@@ -1,0 +1,55 @@
+{
+  "caseCount": 30,
+  "categories": {
+    "chemical_identity_cas": 10,
+    "chemical_identity_formula": 10,
+    "mode_of_action": 2,
+    "resistance_group": 8
+  },
+  "createdAt": "2026-08-27T14:19:47.786643+00:00",
+  "pubchemRecords": [
+    {
+      "cid": 11271640,
+      "name": "Chlorantraniliprole"
+    },
+    {
+      "cid": 6451142,
+      "name": "Prothioconazole"
+    },
+    {
+      "cid": 86102,
+      "name": "Tebuconazole"
+    },
+    {
+      "cid": 3496,
+      "name": "Glyphosate"
+    },
+    {
+      "cid": 2912,
+      "name": "Cypermethrin"
+    },
+    {
+      "cid": 5281303,
+      "name": "Azadirachtin"
+    },
+    {
+      "cid": 9920327,
+      "name": "Abamectin"
+    },
+    {
+      "cid": 61021,
+      "name": "Metaldehyde"
+    },
+    {
+      "cid": 31200,
+      "name": "Fenitrothion"
+    },
+    {
+      "cid": 6325,
+      "name": "Ethylene"
+    }
+  ],
+  "reviewPolicy": "two independent domain reviewers; disagreements require adjudication",
+  "status": "candidate_external_source_set_pending_expert_review",
+  "version": "0.1"
+}

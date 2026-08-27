@@ -1,0 +1,37 @@
+# Frontend
+web/node_modules/
+web/dist/
+web/.env
+web/.env.*
+!web/.env.example
+
+# Backend
+api/target/
+api/.env
+api/.env.*
+!api/.env.example
+api/src/main/resources/application-local.yml
+
+# Local graph data and imports
+**/data/
+**/transactions/
+**/logs/
+**/import/
+evaluation/generated/
+evaluation/results/
+*.dump
+*.backup
+*.csv
+!evaluation/external_gold/expert_review_template_v0.1.csv
+*.xlsx
+*.xls
+
+# Tools and editors
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+*.iml
+*.log
+.DS_Store
+Thumbs.db

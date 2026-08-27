@@ -1,0 +1,27 @@
+server:
+  address: ${SERVER_HOST:127.0.0.1}
+  port: ${SERVER_PORT:4399}
+
+spring:
+  datasource:
+    url: ${CHAT_DB_URL:jdbc:h2:file:./data/agrireg-chat;AUTO_SERVER=TRUE;DB_CLOSE_ON_EXIT=FALSE}
+    driver-class-name: org.h2.Driver
+    username: ${CHAT_DB_USERNAME:sa}
+    password: ${CHAT_DB_PASSWORD:}
+    initialization-mode: always
+  data:
+    neo4j:
+      uri: ${NEO4J_URI:bolt://127.0.0.1:7687}
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD}
+
+logging:
+  level:
+    root: INFO
+    org.neo4j.driver: WARN
+
+deepseek:
+  enabled: ${DEEPSEEK_ENABLED:false}
+  api-key: ${DEEPSEEK_API_KEY:}
+  base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
