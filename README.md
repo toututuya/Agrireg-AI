@@ -44,21 +44,28 @@ AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、
 
 ## 界面预览
 
+<p align="center">
+  <img src="docs/assets/landing-page.png" alt="AgriReg AI 首页" width="100%">
+</p>
+
 <table>
   <thead>
     <tr>
-      <th width="50%">知识图谱工作台</th>
-      <th width="50%">GraphRAG 智能问答</th>
+      <th width="34%">知识图谱工作台</th>
+      <th width="33%">GraphRAG 智能问答</th>
+      <th width="33%">Stateful Agent</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td align="center"><img src="docs/assets/graph-workbench.png" alt="AgriReg AI 知识图谱工作台" width="620"></td>
-      <td align="center"><img src="docs/assets/assistant-grounded-answer.png" alt="AgriReg AI 带图谱依据的智能问答" width="620"></td>
+      <td align="center"><img src="docs/assets/graph-workbench.png" alt="AgriReg AI 知识图谱工作台" width="420"></td>
+      <td align="center"><img src="docs/assets/assistant-workspace.png" alt="AgriReg AI GraphRAG 智能问答工作区" width="420"></td>
+      <td align="center"><img src="docs/assets/agent-workspace.png" alt="AgriReg AI Stateful Agent 工作区" width="420"></td>
     </tr>
     <tr>
       <td>拖拽、缩放、筛选和增量展开实体；右侧查看图片、属性、登记证据与直接关联。</td>
-      <td>恢复最近对话和多轮上下文；回答中的引用可跳回图谱并高亮对应证据。</td>
+      <td>在统一的证据工作区中恢复多轮对话；回答引用可跳回图谱并高亮对应证据。</td>
+      <td>查看任务计划、工具执行、证据核验和人工确认状态，并从检查点继续长任务。</td>
     </tr>
   </tbody>
 </table>

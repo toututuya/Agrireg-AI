@@ -6,21 +6,26 @@ Vue.use(VueRouter);
 const routes = [
   {
     path: '/',
+    name: 'landing',
+    component: () => import('@/views/LandingView.vue')
+  },
+  {
+    path: '/workspace',
     component: () => import('@/views/HomeView.vue'),
     children: [
-      { path: '', redirect: 'graph' },
+      { path: '', redirect: '/graph' },
       {
-        path: 'graph',
+        path: '/graph',
         name: 'graph',
         component: () => import('@/views/GraphView.vue')
       },
       {
-        path: 'ask',
+        path: '/ask',
         name: 'ask',
         component: () => import('@/views/answer/AnswerView.vue')
       },
       {
-        path: 'agent',
+        path: '/agent',
         name: 'agent',
         component: () => import('@/views/agent/AgentView.vue')
       }

@@ -595,6 +595,73 @@ export default {
 .composer textarea:focus-visible { border-color: rgba(116,104,232,.65); box-shadow: 0 0 0 4px rgba(116,104,232,.1); }
 .composer > button { border-radius: 14px; background: linear-gradient(135deg,#7668eb,#6456d9); box-shadow: 0 8px 20px rgba(91,75,199,.22); }
 .composer > button:hover:not(:disabled) { background: linear-gradient(135deg,#695bdd,#5548c3); }
+
+/* Match the AgriReg evidence-network landing and graph workspace. */
+.ask-page { color: #edf7f1; }
+.ask-page button:focus-visible,
+.ask-page textarea:focus-visible,
+.ask-page a:focus-visible { outline-color: #a4ffcb; box-shadow: 0 0 0 5px rgba(164,255,203,.1); }
+.ask-intro p { color: #a4ffcb; }
+.ask-intro h1 { color: #edf7f1; }
+.ask-intro span { color: #91a79c; }
+.graph-link,
+.history-toggle { border-color: rgba(181,231,203,.14); background: rgba(12,25,20,.88); color: #a9bdb2; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.graph-link:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); color: #a4ffcb; }
+.chat-workspace { border-color: rgba(181,231,203,.16); background: #0c1914; box-shadow: 0 28px 80px rgba(0,0,0,.3), 0 2px 10px rgba(0,0,0,.16); }
+.conversation-sidebar { border-right-color: rgba(181,231,203,.12); background: #0a1612; }
+.history-heading span { color: #71877c; }
+.history-heading strong { color: #dbeae1; }
+.new-conversation { border-color: rgba(181,231,203,.14); background: #10231b; color: #a4ffcb; }
+.new-conversation:hover { border-color: rgba(164,255,203,.32); background: rgba(164,255,203,.09); }
+.conversation-item { color: #a9bdb2; }
+.conversation-item:hover { background: rgba(164,255,203,.05); }
+.conversation-item.active { background: rgba(164,255,203,.11); color: #a4ffcb; }
+.conversation-item small,
+.history-note,
+.history-empty,
+.history-status { color: #71877c; }
+.history-note { border-top-color: rgba(181,231,203,.12); }
+.history-empty p { color: #dbeae1; }
+.delete-conversation { color: #71877c; }
+.delete-conversation:hover { background: rgba(255,178,123,.08); color: #ffb27b; }
+.chat-shell { background: #0c1914; }
+.messages { background: radial-gradient(circle at 72% 8%, rgba(72,196,128,.055), transparent 24rem); }
+.avatar { background: #a4ffcb; color: #07110e; box-shadow: 0 7px 18px rgba(164,255,203,.12); }
+.user .avatar { background: rgba(123,229,255,.12); color: #7be5ff; }
+.message-body > strong { color: #edf7f1; }
+.message-body > p { color: #c2d3c9; }
+.user .message-body > p { border: 1px solid rgba(181,231,203,.1); background: #10231b; color: #d8e9df; }
+.focus-row > span,
+.starter-panel > p,
+.thinking { color: #71877c; }
+.focus-row button,
+.follow-ups button,
+.starter-panel button { border-color: rgba(181,231,203,.13); background: #10231b; color: #91a79c; }
+.focus-row button:hover,
+.follow-ups button:hover,
+.starter-panel button:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); color: #a4ffcb; }
+.evidence-panel { border-color: rgba(181,231,203,.14); background: #0a1612; }
+.evidence-title,
+.evidence-item { border-color: rgba(181,231,203,.1); }
+.evidence-title strong { color: #dbeae1; }
+.evidence-title span { color: #71877c; }
+.evidence-item { color: #a9bdb2; }
+.evidence-item:hover { background: rgba(164,255,203,.05); }
+.evidence-item b { color: #a4ffcb; }
+.evidence-item em { background: #152a21; color: #81978c; }
+.evidence-item svg { stroke: #71877c; }
+.evidence-toggle { background: #10231b; color: #a4ffcb; }
+.evidence-toggle:hover { background: rgba(164,255,203,.08); }
+.citation-link { border-color: rgba(255,211,108,.25); background: rgba(255,211,108,.08); color: #ffd36c; }
+.citation-link:hover { border-color: rgba(255,211,108,.5); background: rgba(255,211,108,.13); color: #ffe4a1; }
+.thinking i { background: #a4ffcb; }
+.composer { border-top-color: rgba(181,231,203,.12); background: #0a1612; }
+.composer textarea { border-color: rgba(181,231,203,.16); background: #10231b; color: #edf7f1; }
+.composer textarea::placeholder { color: #61776c; }
+.composer textarea:focus-visible { border-color: rgba(164,255,203,.65); box-shadow: 0 0 0 4px rgba(164,255,203,.09); }
+.composer > button { background: #a4ffcb; color: #07110e; box-shadow: 0 8px 20px rgba(164,255,203,.1); }
+.composer > button:hover:not(:disabled) { background: #d3ffe5; }
+.composer small { color: #71877c; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-2px); } }
 @media (max-width: 680px) {
@@ -603,7 +670,7 @@ export default {
   .ask-intro > div:first-child > span, .graph-link { display: none; }
   .history-toggle { display: inline-flex; }
   .chat-workspace { display: block; height: calc(100vh - 150px); min-height: 480px; border-radius: 15px; }
-  .conversation-sidebar { position: absolute; z-index: 7; inset: 0 auto 0 0; width: min(86vw, 310px); transform: translateX(-102%); border-right: 1px solid #d8deea; box-shadow: 18px 0 44px rgba(22,32,58,.18); transition: transform .2s ease; }
+  .conversation-sidebar { position: absolute; z-index: 7; inset: 0 auto 0 0; width: min(86vw, 310px); transform: translateX(-102%); border-right: 1px solid rgba(181,231,203,.14); box-shadow: 18px 0 44px rgba(0,0,0,.28); transition: transform .2s ease; }
   .sidebar-open .conversation-sidebar { transform: translateX(0); }
   .sidebar-backdrop { position: absolute; z-index: 6; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: rgba(11,22,48,.34); cursor: pointer; }
   .composer textarea { font-size: 16px; }
