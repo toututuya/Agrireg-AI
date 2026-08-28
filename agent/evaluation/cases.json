@@ -1,0 +1,14 @@
+[
+  {"id":"fact-en-1","question":"Chlorantraniliprole 与哪些病虫害有关？","taskType":"fact_check","approval":false,"missing":false,"tools":["search_entity","external_substance_lookup","grounded_answer"]},
+  {"id":"fact-en-2","question":"介绍 'Abamectin' 的作用机制","taskType":"fact_check","approval":false,"missing":false,"tools":["search_entity","external_substance_lookup","grounded_answer"]},
+  {"id":"fact-cn-1","question":"查询 '吡虫啉' 的图谱关系","taskType":"fact_check","approval":false,"missing":false,"tools":["search_entity","external_substance_lookup","grounded_answer"]},
+  {"id":"compare-1","question":"比较 'Abamectin' 与 'Chlorantraniliprole'","taskType":"comparison","approval":false,"missing":false,"tools":["compare_entities","external_substance_lookup","external_substance_lookup","grounded_answer"]},
+  {"id":"compare-2","question":"'Prothioconazole' 和 'Tebuconazole' 有何区别","taskType":"comparison","approval":false,"missing":false,"tools":["compare_entities","external_substance_lookup","external_substance_lookup","grounded_answer"]},
+  {"id":"compare-missing","question":"比较 'Abamectin'","taskType":"comparison","approval":false,"missing":true,"tools":[]},
+  {"id":"path-1","question":"查找 'Prothioconazole' 到 'Spring barley' 的关系路径","taskType":"relation_path","approval":false,"missing":false,"tools":["find_relation_path","grounded_answer"]},
+  {"id":"path-2","question":"'Chlorantraniliprole' 与 'Leaf spot disease' 怎么关联","taskType":"relation_path","approval":false,"missing":false,"tools":["find_relation_path","grounded_answer"]},
+  {"id":"path-missing","question":"查询 'Abamectin' 的关系路径","taskType":"relation_path","approval":false,"missing":true,"tools":[]},
+  {"id":"compliance-1","question":"核验 'Abamectin' 是否合规","taskType":"compliance_screen","approval":true,"missing":false,"tools":["search_entity","external_substance_lookup","grounded_answer"]},
+  {"id":"compliance-2","question":"分析 'Chlorantraniliprole' 的登记与使用风险","taskType":"compliance_screen","approval":true,"missing":false,"tools":["search_entity","external_substance_lookup","grounded_answer"]},
+  {"id":"manual-review","question":"介绍 'Abamectin'","taskType":"fact_check","approval":true,"missing":false,"forceApproval":true,"tools":["search_entity","external_substance_lookup","grounded_answer"]}
+]

@@ -1,11 +1,11 @@
 <h1 align="center">AgriReg AI</h1>
 
 <p align="center">
-  <strong>Evidence-Grounded Pesticide Knowledge Graph & GraphRAG</strong>
+  <strong>Evidence-Grounded Pesticide Knowledge Graph, GraphRAG & Stateful Agent</strong>
 </p>
 
 <p align="center">
-  面向全球农药登记与植保知识的关系检索、图谱分析和可追溯智能问答。
+  面向全球农药登记与植保知识的关系检索、可追溯问答与多步骤证据核验。
 </p>
 
 <p align="center">
@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/Spring_Boot-2.3-6DB33F?style=flat-square&logo=springboot&logoColor=white" alt="Spring Boot 2.3">
   <img src="https://img.shields.io/badge/Neo4j-4.4-4581C3?style=flat-square&logo=neo4j&logoColor=white" alt="Neo4j 4.4">
   <img src="https://img.shields.io/badge/GraphRAG-evaluated-5B5BD6?style=flat-square" alt="GraphRAG evaluated">
+  <img src="https://img.shields.io/badge/LangGraph-1.x-1C3C3C?style=flat-square" alt="LangGraph 1.x">
   <img src="https://img.shields.io/badge/DeepSeek-V4_Flash-4D6BFE?style=flat-square" alt="DeepSeek V4 Flash">
   <a href="https://github.com/toututuya/Agrireg-AI/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/toututuya/Agrireg-AI/ci.yml?branch=main&style=flat-square&label=build" alt="CI build"></a>
   <a href="https://github.com/toututuya/Agrireg-AI/stargazers"><img src="https://img.shields.io/github/stars/toututuya/Agrireg-AI?style=flat-square&logo=github" alt="GitHub stars"></a>
@@ -22,6 +23,7 @@
   <a href="#界面预览">界面预览</a> ·
   <a href="#核心能力">核心能力</a> ·
   <a href="#graphrag-流程">GraphRAG</a> ·
+  <a href="#agrireg-agent-任务流">Agent</a> ·
   <a href="#量化评测">量化评测</a> ·
   <a href="#快速启动">快速启动</a> ·
   <a href="#验证结果与能力边界">能力边界</a> ·
@@ -32,10 +34,11 @@
 
 ## 项目简介
 
-AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、作用靶点和作用方式组织为 Neo4j 多层关联网络，并围绕两个核心场景提供服务：
+AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、作用靶点和作用方式组织为 Neo4j 多层关联网络，并围绕三个核心场景提供服务：
 
 - **知识图谱工作台**：从任意实体出发，探索直接关系、登记穿透、最短路径与产品对比。
 - **图谱增强问答**：从自然语言问题中识别实体，检索 Neo4j 属性与关系证据，再生成带 `[n]` 引用的回答。
+- **多步骤任务分析**：对成分比较、关系路径和登记风险初筛进行任务规划，串联图谱、GraphRAG 与 PubChem 受控工具，检查来源差异，并在结论性报告前支持人工确认与断点恢复。
 
 项目不是按国家拆分的信息门户。地区作为登记来源和监管语境保留在数据层，产品层关注跨来源检索、关系追踪和证据核验。
 
@@ -72,6 +75,10 @@ AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、
 | GraphRAG | 固定检索模板获取属性与关系证据，模型依据编号证据生成回答 |
 | 会话恢复 | H2 持久化最近对话、消息、识别实体和回答证据 |
 | 证据联动 | 点击历史回答中的 `[n]`，返回图谱并高亮对应节点与关系 |
+| Stateful Agent | LangGraph 状态图编排任务规划、受控工具路由、证据合并、冲突检查与报告生成 |
+| Human-in-the-loop | 缺少实体时暂停补充；登记与风险结论在生成报告前进入批准 / 拒绝节点 |
+| 长任务恢复 | SQLite Checkpointer 保存运行状态，Thread / Run / Event 模型支持中断后继续 |
+| 实时进度 | SSE 只推送计划摘要、工具结果、证据与报告状态，不暴露模型隐藏推理 |
 | 可复现评测 | 500 条结构集、50 条图谱一致性集、30 条外部来源候选基准 |
 
 ## 系统架构
@@ -79,19 +86,21 @@ AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、
 ```mermaid
 flowchart LR
     U[用户] --> W[Vue 2 Web]
-    W --> G[Graph API]
-    W --> A[Assistant API]
-    G --> N[(Neo4j 4.4)]
-    A --> H[(H2 会话存储)]
-    A --> P[实体检索规划]
-    P --> N
-    N --> E[有界属性与关系证据]
-    E --> D[DeepSeek V4 Flash]
-    D --> A
-    A --> W
+    W --> J[Spring Boot API]
+    J --> N[(Neo4j 4.4)]
+    J --> H[(H2 会话存储)]
+    W --> A[FastAPI Agent Service]
+    A --> L[LangGraph StateGraph]
+    L --> C[受控 HTTP Tools]
+    C --> J
+    C --> P[PubChem PUG REST]
+    L --> S[(SQLite Checkpoints)]
+    J --> D[DeepSeek]
+    L --> D
+    A -->|SSE events| W
 ```
 
-前端不直接连接 Neo4j。Spring Boot 统一负责参数校验、参数化 Cypher、证据裁剪、对话持久化和大模型调用。
+前端不直接连接 Neo4j。Spring Boot 继续负责参数校验、参数化 Cypher、证据裁剪和固定 GraphRAG；独立 Python 服务只编排受控 HTTP 工具与长任务状态，不持有任意 Cypher 执行能力。
 
 ## GraphRAG 流程
 
@@ -113,7 +122,27 @@ flowchart LR
 5. 回答提示限制模型只能依据编号证据作答，并在结论后标注 `[n]`。
 6. 问题、回答、实体和证据一起持久化，历史引用仍可重新高亮图谱。
 
-现阶段没有为简历强行引入 LangChain 或 LangGraph。当前流程固定、工具数量少，显式 Java 编排更易调试；当系统加入多来源核验、动态工具路由、人工审批和长任务恢复时，再引入状态图更合理。
+固定 GraphRAG 仍服务低延迟单问单答；只有需要跨来源核验、动态步骤、人工确认或长任务恢复的请求进入 Agent。两条链路分开，避免让每一个简单问题都承担状态机和外部核验成本。
+
+## AgriReg Agent 任务流
+
+```mermaid
+stateDiagram-v2
+    [*] --> Plan
+    Plan --> Clarify: 缺少比较对象或路径终点
+    Clarify --> Plan: 用户补充信息
+    Plan --> Execute: 计划完整
+    Execute --> Execute: 还有受控步骤
+    Execute --> Verify: 工具执行完成
+    Verify --> Approval: 登记 / 风险结论
+    Verify --> Report: 普通知识分析
+    Approval --> Report: approve / reject
+    Report --> [*]
+```
+
+当前工具集只有五类：`search_entity`、`compare_entities`、`find_relation_path`、`grounded_answer` 和 `external_substance_lookup`。Agent 不能访问文件系统、Shell、数据库账号或任意网络地址；图谱工具统一调用 Spring Boot 的有界接口，外部核验当前只接 PubChem PUG REST。
+
+运行采用 Thread / Run / Event 模型。LangGraph SQLite Checkpointer 保存节点状态，应用数据库保存用户可见事件；进程重启后运行会进入 `paused`，可从最近检查点继续。生产部署时可将两类 SQLite 存储替换为 PostgreSQL，并由同一 API Gateway 统一鉴权、限流和审计。
 
 ## 量化评测
 
@@ -142,6 +171,16 @@ GraphRAG 在该候选集上提升 **13.33 个百分点**，但中位延迟增加
 | 图谱一致性集 | 50 | 正负例、证据端点、关系约束和引用编号 | 规则检查 50/50 |
 | 外部来源候选集 | 30 | Direct DeepSeek 与 GraphRAG 外部事实命中率 | 26/30 vs 30/30 |
 
+### Agent 工程验收
+
+| 验收层 | 当前结果 | 覆盖内容 |
+| --- | ---: | --- |
+| Python 自动化测试 | 11/11 | 规划、工具白名单、证据去重、冲突检测、中断恢复、SQLite 持久化与异步 API 契约 |
+| 路由契约集 | 12/12 | 事实查询、实体比较、关系路径、缺失信息和合规审批路由 |
+| 本机真实链路 | 2/2 | Neo4j + Spring Boot + GraphRAG + PubChem + DeepSeek；普通报告与人工确认恢复各 1 条 |
+
+真实链路中，`Chlorantraniliprole` 任务完成 3 个受控工具调用，汇总 48 条去重证据；`Abamectin` 风险初筛同样完成 3 个工具调用，在 48 条证据和 1 组字段差异后暂停等待批准，恢复后生成报告。这里验证的是工程链路与状态语义，不等同于领域答案准确率评测。
+
 评测脚本随源码提交，`evaluation/generated/` 和 `evaluation/results/` 中的本地图谱明细不提交。这样既能复现指标计算逻辑，也不会公开数据库内部节点 ID 或本地运行记录。
 
 ## 数据规模
@@ -169,6 +208,7 @@ GraphRAG 在该候选集上提升 **13.33 个百分点**，但中位延迟增加
 | Graph | Neo4j 4.4、参数化 Cypher |
 | GraphRAG | DeepSeek OpenAI-compatible Chat Completions API |
 | Conversation | H2 文件数据库，可替换为 PostgreSQL |
+| Agent | Python 3.11+、FastAPI、LangGraph 1.x、SQLite Checkpointer、SSE、Pydantic、HTTPX |
 | Evaluation | Python、确定性概念匹配、P50/P95、成对对照实验 |
 
 ## 快速启动
@@ -180,6 +220,7 @@ GraphRAG 在该候选集上提升 **13.33 个百分点**，但中位延迟增加
 - Java 8+
 - Maven 3.6+
 - Neo4j 4.4.x
+- Python 3.11+
 
 ### 1. 配置并启动 API
 
@@ -200,7 +241,19 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 
 真实 `.env.local`、API Key 和 H2 对话文件不会提交到 GitHub。
 
-### 2. 启动 Web
+### 2. 启动 Agent（多步骤任务需要）
+
+```powershell
+cd agent
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[dev]"
+Copy-Item .env.example .env.local
+.\.venv\Scripts\python -m uvicorn agrireg_agent.api:app --host 127.0.0.1 --port 8091
+```
+
+在 `agent/.env.local` 中配置 Spring API 地址与可选的 DeepSeek Key。关闭 DeepSeek 时仍可运行确定性规划、工具链和检查点流程；启用后使用结构化规划与证据化报告生成。
+
+### 3. 启动 Web
 
 ```powershell
 cd web
@@ -212,6 +265,7 @@ pnpm serve
 
 - 知识图谱：`http://127.0.0.1:8082/graph`
 - AI 问答：`http://127.0.0.1:8082/ask`
+- 任务分析：`http://127.0.0.1:8082/agent`
 
 生产构建：
 
@@ -252,6 +306,10 @@ python evaluation/compare_direct_vs_graphrag.py --tag external-local
 | `GET` | `/api/conversations?visitorId=...` | 最近对话列表 |
 | `GET` | `/api/conversations/{id}?visitorId=...` | 恢复消息与证据 |
 | `DELETE` | `/api/conversations/{id}?visitorId=...` | 删除一条对话 |
+| `POST` | `:8091/api/agent/threads` | 创建可持久化任务线程 |
+| `POST` | `:8091/api/agent/threads/{threadId}/runs` | 启动一次多步骤分析 |
+| `GET` | `:8091/api/agent/threads/{threadId}/runs/{runId}/events` | SSE 订阅用户可见进度 |
+| `POST` | `:8091/api/agent/threads/{threadId}/runs/{runId}/resume` | 补充信息或批准 / 拒绝 |
 
 ## 项目结构
 
@@ -259,6 +317,7 @@ python evaluation/compare_direct_vs_graphrag.py --tag external-local
 .
 ├─ web/                         # Vue 知识图谱与 AI 问答前端
 ├─ api/                         # Spring Boot 图谱、问答与会话 API
+├─ agent/                       # FastAPI + LangGraph 多步骤 Agent、检查点与测试
 ├─ evaluation/                  # 数据集生成、评测与外部对照实验
 │  └─ external_gold/            # 外部候选事实与专家复核模板
 ├─ ops/data-cleaning/           # 可复现图谱清洗和审计 Cypher
@@ -277,6 +336,8 @@ python evaluation/compare_direct_vs_graphrag.py --tag external-local
 - `Prothioconazole → 登记号 → Spring barley` 两跳关系可查询。
 - 最近对话、多轮指代、历史恢复和证据重新高亮可运行。
 - 500 条结构评测、50 条图谱一致性评测和 30 条外部来源候选对照已执行。
+- Agent 11 个自动化测试与 12 个路由契约通过；真实图谱普通任务和人工确认任务均完成。
+- `/agent` 在 1440px 与 375px 下完成浏览器检查，无页面横向滚动；SSE 可实时更新任务时间线、证据和报告。
 
 ### 能力边界
 
@@ -285,6 +346,7 @@ python evaluation/compare_direct_vs_graphrag.py --tag external-local
 - 外部 30 条候选集仍需要两位领域专家复核，不能包装成正式专家金标准。
 - 当前指标来自本机顺序请求，不代表生产并发性能。
 - 系统用于关系检索、植保知识查询和合规初筛，不能替代法规、登记标签和领域专家的最终判断。
+- 本地 Thread / Run 接口尚未接入账户鉴权；公开部署前需要通过 API Gateway 加入身份认证、租户隔离、限流与审计。
 
 ## Roadmap / Todo
 
@@ -316,16 +378,20 @@ python evaluation/compare_direct_vs_graphrag.py --tag external-local
 - [ ] 将本地 H2 会话迁移到 PostgreSQL，增加账户登录、会话隔离和数据保留策略。
 - [ ] 增加可观测性：结构化日志、调用链、Neo4j 查询耗时、LLM token 与失败原因统计。
 
-### P3 · Agent 化条件
+### P3 · Agent 化
 
-- [ ] 加入“图谱检索 → 外部原文核验 → 冲突检测 → 报告生成”的多步骤任务。
-- [ ] 在出现动态工具路由、循环核验、人工审批和长任务恢复后，再评估引入 LangGraph；当前固定流程继续使用显式 Java 编排。
-- [ ] 为成分、登记、作物—病虫害、产品对比和来源核验设计受控工具接口，禁止 Agent 执行无界 Cypher。
+- [x] 加入“图谱检索 → PubChem 外部核验 → 冲突检测 → 报告生成”的多步骤任务。
+- [x] 使用 LangGraph 实现动态工具步骤、缺失信息中断、人工确认和 SQLite 检查点恢复。
+- [x] 将成分检索、产品对比、关系路径、GraphRAG 和外部来源封装为受控 HTTP 工具，禁止 Agent 执行无界 Cypher。
+- [x] 新增任务工作台，使用 SSE 展示用户可见的计划、工具、证据、差异与报告事件。
+- [ ] 加入更多登记主管部门原文工具，并为来源可用性、字段新鲜度和跨来源冲突建立独立评测集。
 - [ ] 仅在全图离线计算规模和业务需求成立时引入 GraphX，用于社区发现、相似性或关联传播，并将结果写回 Neo4j 供在线查询。
 
 ## 文档
 
 - [架构与关键决策](docs/ARCHITECTURE.md)
+- [Agent 架构、开源参考与安全边界](docs/AGENT_ARCHITECTURE_CN.md)
+- [Agent 工程验收报告](docs/AGENT_EVALUATION_CN.md)
 - [项目讲解与面试题](docs/PRODUCT_AND_INTERVIEW_CN.md)
 - [GraphRAG 评测与检索优化](docs/EVALUATION_REPORT_CN.md)
 - [Direct DeepSeek 与 GraphRAG 对照实验](docs/EXTERNAL_ABLATION_REPORT_CN.md)

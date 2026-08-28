@@ -37,15 +37,16 @@ sequenceDiagram
 
 当数据达到数亿级边、需要全图 PageRank、连通分量或大规模社区发现时，可以把 Neo4j 作为在线服务层，把离线图计算结果从 Spark 回写 Neo4j。当前阶段不应为了简历关键词提前引入。
 
-## Why not LangGraph yet
+## Why a separate LangGraph service now
 
-当前问答是有会话状态、但检索流程固定的两阶段 GraphRAG。保存多轮消息本身不需要状态机框架，显式 Java 编排拥有更少依赖和更清晰的失败边界。LangGraph 的合理触发条件包括：
+固定 GraphRAG 继续由 Java 显式编排，负责低延迟问答。新增任务具备受控工具路由、跨来源核验、字段冲突检查、人工确认和长任务恢复，这些状态转换已达到引入状态图的条件。
 
-- 多个检索工具需要动态路由；
-- 需要查询改写、结果验证和重试循环；
-- 需要人工确认高风险建议；
-- 需要跨来源原文核验、冲突检测和报告生成；
-- 需要持久化并恢复耗时较长的研究任务。
+Agent 使用独立 Python 服务，原因不是绕开现有后端，而是保持职责清晰：
+
+- Spring Boot 持有 Neo4j 连接、参数化 Cypher、证据裁剪与会话数据；
+- LangGraph 只持有任务状态和受控 HTTP 工具，不直接连接 Neo4j；
+- Vue 同时提供 `/ask` 快速问答和 `/agent` 多步骤任务工作台；
+- SQLite Checkpointer 保存节点状态，SSE 只输出用户可见事件，不输出隐藏推理。
 
 ## Known next steps
 
@@ -54,4 +55,4 @@ sequenceDiagram
 - 加入来源、管辖区、登记状态和生效时间；
 - 构建小型公开样例图与幂等导入脚本；
 - 为检索召回率、证据覆盖率和答案忠实度增加评测集。
-- 增加来源文档、图谱查询、产品比较和报告导出工具，再把固定 GraphRAG 升级为有边界的工作流 Agent。
+- 将 Agent 的本地 SQLite Checkpointer 与运行记录迁移到 PostgreSQL，并加入账户鉴权、限流和审计。

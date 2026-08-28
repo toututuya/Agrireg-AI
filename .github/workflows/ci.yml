@@ -46,6 +46,26 @@ jobs:
       - name: Build Web
         run: pnpm build
 
+  agent:
+    name: LangGraph Agent
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: agent/pyproject.toml
+      - name: Install Agent
+        run: python -m pip install -e ".[dev]"
+      - name: Run Agent tests
+        run: pytest
+      - name: Evaluate deterministic routing contract
+        run: python evaluation/run_eval.py
+
   evaluation:
     name: Evaluation scripts
     runs-on: ubuntu-latest

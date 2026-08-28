@@ -19,6 +19,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H9l-4 3V5Z"/><path d="M9 9h6M9 12h4"/></svg>
           AI 问答
         </router-link>
+        <router-link to="/agent">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v5H5zM5 15h14v5H5zM8 9v6m8-6v6"/><circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/></svg>
+          任务分析
+        </router-link>
       </nav>
     </header>
 
@@ -31,6 +35,14 @@ export default {
   name: 'HomeView',
   created() {
     document.title = 'AgriReg AI · 全球农药知识图谱';
+  },
+  watch: {
+    '$route.name'() {
+      this.$nextTick(() => {
+        const main = document.getElementById('main-content');
+        if (main) main.focus({ preventScroll: true });
+      });
+    }
   }
 };
 </script>

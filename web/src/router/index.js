@@ -18,6 +18,11 @@ const routes = [
         path: 'ask',
         name: 'ask',
         component: () => import('@/views/answer/AnswerView.vue')
+      },
+      {
+        path: 'agent',
+        name: 'agent',
+        component: () => import('@/views/agent/AgentView.vue')
       }
     ]
   },

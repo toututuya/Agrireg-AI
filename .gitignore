@@ -12,6 +12,15 @@ api/.env.*
 !api/.env.example
 api/src/main/resources/application-local.yml
 
+# Agent service
+agent/.venv/
+agent/.env
+agent/.env.*
+!agent/.env.example
+agent/.pytest_cache/
+agent/.coverage
+*.egg-info/
+
 # Local graph data and imports
 **/data/
 **/transactions/
