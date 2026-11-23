@@ -13,6 +13,7 @@ from .config import Settings
 from .graph import build_agent_graph
 from .planner_sft import LocalQwenPlanner
 from .store import RunStore
+from .task_queue import MAX_SUBTASKS
 
 
 class AgentRuntime:
@@ -39,12 +40,16 @@ class AgentRuntime:
         self.graph = build_agent_graph(
             self.tools, self.llm, self.checkpointer,
             planner=self.planner, documents_enabled=bool(settings.milvus_uri), max_tool_steps=settings.max_tool_steps,
+            max_tool_attempts=settings.max_tool_attempts,
         )
         self._tasks: set[asyncio.Task[Any]] = set()
 
     def start_run(self, run_id: str) -> None:
+        self._spawn(self._drive_async(run_id, self._initial_payload(run_id)))
+
+    def _initial_payload(self, run_id: str) -> dict[str, Any]:
         run = self.store.get_run(run_id)
-        payload = {
+        return {
             "question": run["question"],
             "require_approval": run["requireApproval"],
             "context": self.store.planning_context(run_id, run["threadId"]),
@@ -52,13 +57,9 @@ class AgentRuntime:
             "evidence": [],
             "events": [],
         }
-        self._spawn(self._drive_async(run_id, payload))
 
     def resume_run(self, run_id: str, value: Any) -> None:
-        run = self.store.get_run(run_id)
-        if run["status"] not in {"waiting_clarification", "waiting_approval", "paused"}:
-            raise ValueError("run_not_resumable")
-        self.store.update_run(run_id, "running", interrupt_json=None, error=None)
+        run = self.store.claim_resume(run_id)
         self.store.append_event(run_id, "run_resumed", "继续分析任务", "任务已从保存的状态继续。", {})
         payload: Any = None if run["status"] == "paused" and value is None else Command(resume=value)
         self._spawn(self._drive_async(run_id, payload))
@@ -72,10 +73,15 @@ class AgentRuntime:
         await asyncio.to_thread(self._drive, run_id, payload)
 
     def _drive(self, run_id: str, payload: Any) -> None:
-        config = {"configurable": {"thread_id": f"run:{run_id}"}}
+        config = {
+            "configurable": {"thread_id": f"run:{run_id}"},
+            "recursion_limit": 10 * MAX_SUBTASKS + self.settings.max_tool_attempts + 16,
+        }
         try:
+            if payload is None and not self.graph.get_state(config).values:
+                payload = self._initial_payload(run_id)
             interrupt_payload = None
-            for chunk in self.graph.stream(payload, config, stream_mode="updates"):
+            for chunk in self.graph.stream(payload, config, stream_mode="updates", durability="sync"):
                 if "__interrupt__" in chunk:
                     interrupt_payload = self._interrupt_value(chunk["__interrupt__"])
                     break
@@ -91,14 +97,12 @@ class AgentRuntime:
                             item.get("payload") or {},
                         )
 
+            snapshot = self.graph.get_state(config)
+            if interrupt_payload is None and snapshot.interrupts:
+                interrupt_payload = self._interrupt_value(snapshot.interrupts)
             if interrupt_payload:
                 kind = interrupt_payload.get("kind")
                 status = "waiting_approval" if kind == "approval" else "waiting_clarification"
-                self.store.update_run(
-                    run_id,
-                    status,
-                    interrupt_json=json.dumps(interrupt_payload, ensure_ascii=False),
-                )
                 self.store.append_event(
                     run_id,
                     "input_required",
@@ -106,15 +110,18 @@ class AgentRuntime:
                     interrupt_payload.get("message", "请补充信息后继续。"),
                     interrupt_payload,
                 )
+                self.store.update_run(
+                    run_id,
+                    status,
+                    interrupt_json=json.dumps(interrupt_payload, ensure_ascii=False),
+                )
                 return
 
-            snapshot = self.graph.get_state(config)
             values = snapshot.values if snapshot else {}
             report = values.get("report", "") if isinstance(values, dict) else ""
             final_status = "rejected" if values.get("approval_decision") == "reject" else "completed"
             self.store.update_run(run_id, final_status, report=report, interrupt_json=None, error=None)
         except Exception as exc:
-            self.store.update_run(run_id, "failed", error=str(exc))
             self.store.append_event(
                 run_id,
                 "run_failed",
@@ -122,6 +129,7 @@ class AgentRuntime:
                 "任务状态已经保存，可以检查依赖服务后重新运行。",
                 {},
             )
+            self.store.update_run(run_id, "failed", error=str(exc))
 
     @staticmethod
     def _interrupt_value(raw: Any) -> dict[str, Any]:

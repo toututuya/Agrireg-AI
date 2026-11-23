@@ -5,6 +5,7 @@ import re
 from typing import Any, Protocol
 
 from .models import PlanStep, TaskPlan
+from .task_queue import CLARIFICATION_SEPARATOR
 
 
 PLANNER_SYSTEM = """You plan bounded pesticide knowledge tasks. Return one JSON object only.
@@ -31,6 +32,18 @@ REGISTRATION = re.compile(r"(?<![A-Z0-9])(?:PD|WP|LS|WL|EX)\d{5,12}(?![A-Z0-9])"
 DOCUMENT_TERMS = re.compile(r"登记(证|号|文档|内容|材料|有效|状态)|说明书|标签|文件|附件")
 COMPLIANCE_TERMS = re.compile(r"合规|风险|禁用|批准|能否使用|是否允许")
 FOLLOWUP = re.compile(r"^(?:那[么，, ]*)?(?:它|该产品|这个产品|该成分|该对象|上一个)")
+REGISTRATION_FIELD = r"(?:登记(?:证)?(?:编)?号|证号)"
+DOCUMENT_CONTENT = re.compile(r"原文|文件|文档|附件|材料|标签|说明书")
+EXACT_REGISTRATION_REQUEST = re.compile(
+    rf"精[确准]|按(?:实际|目标|具体)?{REGISTRATION_FIELD}|(?:实际|目标|具体)(?:的)?{REGISTRATION_FIELD}|一张(?:登记)?证"
+)
+MISSING_REGISTRATION_FIELD = re.compile(
+    rf"{REGISTRATION_FIELD}\s*(?:我\s*)?(?:还(?:没|未)(?:[填发给贴]|提[供交])|"
+    r"尚未(?:填|发|给|提供|指定)|未(?:填|发|给|提供|指定)|没(?:填|发|给|提供)|稍后(?:补|发|提供)|空着|待补)"
+    rf"|(?:等我|待我)补(?:上|发|充)?(?:实际|目标|具体)?(?:的)?{REGISTRATION_FIELD}"
+)
+OPTIONAL_REGISTRATION_FIELD = re.compile(rf"(?:不[用按限]|无需|无须)(?:按|使用|限定)?{REGISTRATION_FIELD}")
+ILLUSTRATIVE_REGISTRATION = re.compile(r"示例|举例|例如|比如|仅供参考|例子|演示格式")
 
 
 class PlannerModel(Protocol):
@@ -93,12 +106,43 @@ def build_plan(
         entities = recent[-1]["entities"]
         if len(entities) == 1:
             question = FOLLOWUP.sub(entities[0], question, count=1)
+    exact = plan_explicit_missing_registration(question, require_approval) if documents_enabled else None
+    if exact is not None:
+        return exact
     candidate = llm.json_completion(PLANNER_SYSTEM, planning_input(question, documents_enabled, context))
     plan = parse_plan(candidate, question, documents_enabled)
     if plan is None:
         return fallback_plan(question, require_approval, documents_enabled)
     plan.requires_approval = plan.requires_approval or require_approval or needs_human_approval(question, plan)
     return plan
+
+
+def plan_explicit_missing_registration(question: str, require_approval: bool) -> TaskPlan | None:
+    original, *supplements = question.split(CLARIFICATION_SEPARATOR)
+    if (
+        not DOCUMENT_CONTENT.search(original) or not EXACT_REGISTRATION_REQUEST.search(original)
+        or not MISSING_REGISTRATION_FIELD.search(original) or OPTIONAL_REGISTRATION_FIELD.search(original)
+    ):
+        return None
+    compliance = bool(COMPLIANCE_TERMS.search(question))
+    task_type = "compliance_screen" if compliance else "fact_check"
+    approval = require_approval or compliance
+    if supplements:
+        latest = supplements[-1]
+        supplied = _unique([match.group().upper() for match in REGISTRATION.finditer(latest)])
+        if len(supplied) == 1 and not (ILLUSTRATIVE_REGISTRATION.search(latest) or MISSING_REGISTRATION_FIELD.search(latest)):
+            registration = supplied[0]
+            return TaskPlan(
+                task_type=task_type, summary="按补充的目标登记证号检索原文", entities=[registration],
+                requires_approval=approval, steps=[PlanStep(
+                    id="documents", title="检索登记文档原文", tool="search_documents",
+                    arguments={"query": registration, "registration_number": registration},
+                )],
+            )
+    return TaskPlan(
+        task_type=task_type, summary="确认要查询的登记证号", requires_approval=approval,
+        missing_information="请补充要查询的目标登记证号。",
+    )
 
 
 def fallback_plan(question: str, require_approval: bool = False, documents_enabled: bool = False) -> TaskPlan:
@@ -146,7 +190,7 @@ def fallback_plan(question: str, require_approval: bool = False, documents_enabl
 
 
 def extract_entities(question: str) -> list[str]:
-    segments = question.split("；补充信息：")
+    segments = question.split(CLARIFICATION_SEPARATOR)
     if len(segments) > 1:
         return _unique([entity for segment in segments for entity in extract_entities(segment)])[:4]
     quoted = re.findall(r"[‘’'\"“”]([^‘’'\"“”]{2,80})[‘’'\"“”]", question)
@@ -198,7 +242,8 @@ def followup_steps(
     attempted = {signature(PlanStep.model_validate(item["step"])) for item in tool_results}
     candidates: list[PlanStep] = []
     for item in tool_results:
-        if item.get("evidence_count", len(item.get("result", {}).get("evidence") or [])):
+        evidence_count = item.get("evidence_count", len(item.get("result", {}).get("evidence") or []))
+        if item.get("outcome", "ok" if evidence_count else "empty") == "ok":
             continue
         step = PlanStep.model_validate(item["step"])
         args = step.arguments

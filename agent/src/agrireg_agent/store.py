@@ -11,6 +11,7 @@ from typing import Any
 from .models import TaskPlan
 
 TERMINAL_STATUSES = {"completed", "failed", "rejected"}
+EVENT_PAGE_SIZE = 100
 
 
 def utc_now() -> str:
@@ -193,7 +194,8 @@ class RunStore:
             turns.append({
                 "question": row["question"][:300],
                 "type": plan.task_type if plan else "",
-                "entities": [entity[:80] for entity in plan.entities] if plan and not plan.missing_information else [],
+                "entities": [entity[:80] for entity in plan.entities]
+                if plan and not plan.missing_information and event.get("taskId") is None else [],
             })
         older = turns[3:]
         return {
@@ -213,6 +215,20 @@ class RunStore:
         values = list(updates.values()) + [run_id]
         with self._lock, self._connect() as connection:
             connection.execute(f"UPDATE agent_runs SET {assignments} WHERE id = ?", values)
+
+    def claim_resume(self, run_id: str) -> dict[str, Any]:
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row["status"] not in {"waiting_clarification", "waiting_approval", "paused"}:
+                raise ValueError("run_not_resumable")
+            connection.execute(
+                "UPDATE agent_runs SET status = 'running', interrupt_json = NULL, error = NULL, updated_at = ? WHERE id = ?",
+                (utc_now(), run_id),
+            )
+        return self._run_from_row(row)
 
     def append_event(
         self,
@@ -234,8 +250,8 @@ class RunStore:
     def events_after(self, run_id: str, after: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM agent_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT 100",
-                (run_id, after),
+                "SELECT * FROM agent_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+                (run_id, after, EVENT_PAGE_SIZE),
             ).fetchall()
             return [self._event_from_row(row) for row in rows]
 

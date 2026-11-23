@@ -5,6 +5,10 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from .task_queue import Subtask
+
+
+DEFAULT_TOOL_ATTEMPTS = 48
 
 ToolName = Literal[
     "search_entity",
@@ -40,6 +44,14 @@ class AgentState(TypedDict, total=False):
     context: dict[str, Any]
     clarification_count: int
     replanned: bool
+    primary_step_count: int
+    step_attempt: int
+    retry_wait: float
+    tool_attempts: int
+    subtasks: list[Subtask]
+    active_task_id: int | None
+    task_result_start: int
+    dispatch_action: Literal["plan", "clarify", "verify"]
     tool_results: Annotated[list[dict[str, Any]], operator.add]
     evidence: Annotated[list[dict[str, Any]], operator.add]
     verified_evidence: list[dict[str, Any]]

@@ -13,7 +13,8 @@ from .config import get_settings
 from .documents import DocumentHit, DocumentSearchRequest, MilvusDocumentSearch, get_document_search
 from .models import CreateThreadRequest, ResumeRunRequest, StartRunRequest
 from .runtime import AgentRuntime
-from .store import TERMINAL_STATUSES
+from .store import EVENT_PAGE_SIZE, TERMINAL_STATUSES
+from .task_queue import split_subtasks
 
 
 settings = get_settings()
@@ -72,6 +73,10 @@ def get_thread(thread_id: str) -> dict[str, object]:
 @app.post("/api/agent/threads/{thread_id}/runs", status_code=status.HTTP_202_ACCEPTED)
 async def create_run(thread_id: str, payload: StartRunRequest) -> dict[str, object]:
     try:
+        split_subtasks(payload.question)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         run = runtime.store.create_run(thread_id, payload.question, payload.require_approval)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="任务不存在。") from exc
@@ -118,16 +123,18 @@ async def stream_events(
         nonlocal cursor
         idle_cycles = 0
         while not await request.is_disconnected():
+            run = runtime.store.get_run(run_id, thread_id)
             events = runtime.store.events_after(run_id, cursor)
             if events:
                 idle_cycles = 0
                 for item in events:
                     cursor = int(item["seq"])
                     yield f"id: {cursor}\nevent: agent_event\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
+                if len(events) == EVENT_PAGE_SIZE:
+                    continue
             else:
                 idle_cycles += 1
 
-            run = runtime.store.get_run(run_id, thread_id)
             if run["status"] in TERMINAL_STATUSES or run["status"].startswith("waiting_"):
                 payload = json.dumps(run, ensure_ascii=False)
                 yield f"event: run_snapshot\ndata: {payload}\n\n"

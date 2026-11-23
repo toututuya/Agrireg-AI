@@ -169,7 +169,9 @@ class ControlledTools:
                 response = client.get(endpoint)
                 response.raise_for_status()
                 rows = response.json().get("PropertyTable", {}).get("Properties", [])[:3]
-        except (httpx.HTTPError, ValueError, TypeError):
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
             rows = []
         evidence = []
         for row in rows:
