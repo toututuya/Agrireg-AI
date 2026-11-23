@@ -45,6 +45,10 @@ def planning_input(question: str, documents_enabled: bool, context: dict[str, An
     }, ensure_ascii=False, separators=(",", ":"))
 
 
+def needs_human_approval(question: str, plan: TaskPlan) -> bool:
+    return plan.task_type == "compliance_screen" or bool(COMPLIANCE_TERMS.search(question))
+
+
 def parse_plan(candidate: Any, question: str, documents_enabled: bool) -> TaskPlan | None:
     try:
         plan = TaskPlan.model_validate(candidate)
@@ -93,10 +97,7 @@ def build_plan(
     plan = parse_plan(candidate, question, documents_enabled)
     if plan is None:
         return fallback_plan(question, require_approval, documents_enabled)
-    plan.requires_approval = (
-        plan.requires_approval or require_approval or plan.task_type == "compliance_screen"
-        or bool(COMPLIANCE_TERMS.search(question))
-    )
+    plan.requires_approval = plan.requires_approval or require_approval or needs_human_approval(question, plan)
     return plan
 
 
