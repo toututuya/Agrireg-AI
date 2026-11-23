@@ -31,6 +31,10 @@ TOOL_ARGUMENTS = {
 REGISTRATION = re.compile(r"(?<![A-Z0-9])(?:PD|WP|LS|WL|EX)\d{5,12}(?![A-Z0-9])", re.I)
 DOCUMENT_TERMS = re.compile(r"登记(证|号|文档|内容|材料|资料|有效|状态)|说明书|标签|文件|附件")
 COMPLIANCE_TERMS = re.compile(r"合规|风险|禁用|批准|能否使用|是否允许")
+DEFINITION_QUESTION = re.compile(
+    r"(?:请问\s*)?(?:(?:什么是|何谓)\s*([^。！？?!，；;\n]{1,80})|"
+    r"([^。！？?!，；;\n]{1,80})\s*(?:是什么|是啥|是什么意思))[\s。！？?!]*"
+)
 FOLLOWUP = re.compile(r"^(?:那[么，, ]*)?(?:它|该产品|这个产品|该成分|该对象|上一个)")
 REGISTRATION_FIELD = r"(?:登记(?:证)?(?:编)?号|证号)"
 MIGRATION_REGISTRATION = r"(?:\d{2}[A-Z0-9]\d{3}-\d{2}|\d{4}(?:-\d{1,3})?)"
@@ -115,6 +119,12 @@ def build_plan(
     exact = plan_explicit_missing_registration(question, require_approval) if documents_enabled else None
     if exact is not None:
         return exact
+    subject = definition_subject(question)
+    if subject:
+        return TaskPlan(
+            task_type="fact_check", summary="查询图谱释义", entities=[subject], requires_approval=require_approval,
+            steps=[PlanStep(id="definition", title="查找实体释义", tool="search_entity", arguments={"keyword": subject})],
+        )
     candidate = llm.json_completion(PLANNER_SYSTEM, planning_input(question, documents_enabled, context))
     plan = parse_plan(candidate, question, documents_enabled)
     if plan is None:
@@ -126,6 +136,13 @@ def build_plan(
                 step.arguments["registration_number"] = registration
     plan.requires_approval = plan.requires_approval or require_approval or needs_human_approval(question, plan)
     return plan
+
+
+def definition_subject(question: str) -> str:
+    if COMPLIANCE_TERMS.search(question):
+        return ""
+    match = DEFINITION_QUESTION.fullmatch(question.strip())
+    return (match.group(1) or match.group(2)).strip(" \t“”‘’\"'") if match else ""
 
 
 def plan_explicit_missing_registration(question: str, require_approval: bool) -> TaskPlan | None:
@@ -269,7 +286,7 @@ def document_step(question: str) -> PlanStep:
 def followup_steps(
     question: str, tool_results: list[dict[str, Any]], documents_enabled: bool, remaining: int,
 ) -> list[PlanStep]:
-    if remaining < 1:
+    if remaining < 1 or definition_subject(question):
         return []
     def signature(step: PlanStep) -> tuple:
         return step.tool, tuple(sorted((name, str(value).strip().casefold()) for name, value in step.arguments.items()))

@@ -35,9 +35,6 @@ public class GraphAssistantController {
         if (question.length() < 2 || question.length() > 300) {
             return error(HttpStatus.BAD_REQUEST, "请输入 2–300 个字符的问题。", "INVALID_QUESTION");
         }
-        if (!assistantService.isConfigured()) {
-            return error(HttpStatus.SERVICE_UNAVAILABLE, "图谱智能问答暂未开放。", "ASSISTANT_UNAVAILABLE");
-        }
         try {
             Map<String, Object> result = assistantService.ask(
                     question,

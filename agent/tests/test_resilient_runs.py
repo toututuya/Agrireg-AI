@@ -34,6 +34,34 @@ def run_graph(tmp_path, question, handler, **options):
     )
 
 
+def test_definition_uses_sourced_graph_fact_with_documents_enabled(tmp_path):
+    def graph_response(request):
+        assert request.url.path == "/api/graph/search"
+        assert request.url.params["keyword"] == "叶锈病"
+        return httpx.Response(200, json={"nodes": [{
+            "id": 1, "name": "leaf rust", "label": "Disease", "center": True,
+            "properties": {
+                "name": "leaf rust", "definition_zh": "有来源的释义。",
+                "definition_source_title": "病害资料", "definition_source_url": "https://example.org/definition",
+            },
+        }], "edges": []})
+
+    result = run_graph(tmp_path, "叶锈病是啥", graph_response, documents_enabled=True)
+    assert [item["step"]["tool"] for item in result["tool_results"]] == ["search_entity"]
+    assert result["report"] == "有来源的释义。 [1]"
+    assert result["verified_evidence"][0]["url"] == "https://example.org/definition"
+
+
+def test_definition_without_graph_evidence_does_not_use_unrelated_documents(tmp_path):
+    def graph_response(request):
+        assert request.url.path == "/api/graph/search"
+        return httpx.Response(200, json={"nodes": [], "edges": []})
+
+    result = run_graph(tmp_path, "什么是这个病名？", graph_response, documents_enabled=True)
+    assert [item["step"]["tool"] for item in result["tool_results"]] == ["search_entity"]
+    assert result["report"] == "图谱暂未找到「这个病名」的可引用释义。"
+
+
 def test_twelve_step_run_retries_only_the_timed_out_step(tmp_path, monkeypatch):
     calls = Counter()
     waits = []

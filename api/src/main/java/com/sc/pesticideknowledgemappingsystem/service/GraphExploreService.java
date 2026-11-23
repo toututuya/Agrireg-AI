@@ -23,7 +23,8 @@ public class GraphExploreService {
     private static final int MAX_NEIGHBOR_PROPERTIES = 8;
     private static final int MAX_PROPERTY_LENGTH = 600;
     private static final List<String> IMPORTANT_PROPERTIES = Arrays.asList(
-            "name", "Trade name", "Pesticide name", "Active Ingredient",
+            "name", "definition_zh", "definition_source_url", "definition_source_title",
+            "Trade name", "Pesticide name", "Active Ingredient",
             "jurisdiction", "valid_until",
             "Member State of origin", "Status", "Registration Status",
             "End of approval", "Time expiry date_y", "valid until",
@@ -124,7 +125,8 @@ public class GraphExploreService {
 
         String fallbackCypher =
                 "MATCH (node) " +
-                "WHERE " + searchableText("node") + " CONTAINS toLower($keyword) " +
+                "WITH node, any(value IN coalesce(node.aliases, []) WHERE toLower(trim(value)) = $normalized) AS exactAlias " +
+                "WHERE exactAlias OR " + searchableText("node") + " CONTAINS toLower($keyword) " +
                 "WITH node, " + matchRank("node", "keyword") + " AS matchRank " +
                 "ORDER BY matchRank, size(" + primaryName("node") + "), id(node) LIMIT 1 " +
                 "RETURN id(node) AS nodeId";
@@ -478,6 +480,7 @@ public class GraphExploreService {
         String keyword = "toLower($" + parameter + ")";
         return "CASE " +
                 "WHEN toLower(" + primaryName(alias) + ") = " + keyword + " THEN 0 " +
+                "WHEN exactAlias THEN 1 " +
                 "WHEN toLower(coalesce(toString(" + alias + ".`Trade name`), '')) = " + keyword + " THEN 1 " +
                 "WHEN toLower(coalesce(toString(" + alias + ".`Pesticide name`), '')) = " + keyword + " THEN 1 " +
                 "WHEN toLower(coalesce(toString(" + alias + ".`Active Ingredient`), '')) = " + keyword + " THEN 1 " +

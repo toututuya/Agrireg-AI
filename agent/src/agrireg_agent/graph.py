@@ -10,7 +10,7 @@ from langgraph.types import interrupt
 
 from .clients import ControlledTools, DeepSeekClient
 from .models import DEFAULT_TOOL_ATTEMPTS, AgentState, PlanStep, TaskPlan
-from .planner import PlannerModel, build_plan, compact_plan, followup_steps
+from .planner import PlannerModel, build_plan, compact_plan, definition_subject, followup_steps
 from .task_queue import CLARIFICATION_SEPARATOR, TASK_STATUS_LABELS, Subtask, public_subtask, split_subtasks, task_question
 from .tool_execution import assess_result, retry_delay
 
@@ -478,6 +478,16 @@ def build_report(state: AgentState, llm: DeepSeekClient) -> str:
     plan = TaskPlan.model_validate(state["plan"])
     if plan.missing_information:
         return f"# 信息待补\n\n{plan.missing_information}"
+
+    subject = definition_subject(state["question"])
+    if subject:
+        for item in evidence:
+            if item.get("kind") == "entity_definition":
+                return f"{item['summary']} [{item['index']}]"
+        if evidence:
+            entity = evidence[0]
+            return f"图谱收录了「{entity['title']}」[{entity['index']}]。当前条目缺少可引用的释义。"
+        return f"图谱暂未找到「{subject}」的可引用释义。"
 
     ranked = sorted(evidence, key=lambda item: item.get("kind") != "document_excerpt")[:12]
     selected = ranked[:8]
