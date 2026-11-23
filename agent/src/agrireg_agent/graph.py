@@ -12,7 +12,7 @@ from .answering import AnswerModel, explain_general
 from .clients import ControlledTools, DeepSeekClient
 from .models import DEFAULT_TOOL_ATTEMPTS, AgentState, PlanStep, TaskPlan
 from .planner import PlannerModel, build_plan, compact_plan, definition_subject, followup_steps, resolve_context
-from .presentation import evidence_line, important_evidence, render_finding, tool_finding
+from .presentation import evidence_line, important_evidence, render_finding, report_relation_paths, tool_finding
 from .task_queue import CLARIFICATION_SEPARATOR, TASK_STATUS_LABELS, Subtask, public_subtask, split_subtasks, task_question
 from .tool_execution import assess_result, retry_delay
 
@@ -329,6 +329,10 @@ def build_agent_graph(
         report = build_report(state, llm, answer_model)
         tasks = state.get("subtasks") or []
         payload = {"tasks": [public_subtask(task) for task in tasks]} if tasks else {}
+        if state.get("approval_decision") != "reject":
+            paths = report_relation_paths(state.get("tool_results") or [], state.get("verified_evidence") or [])
+            if paths:
+                payload["relationPaths"] = paths
         return {
             "report": report,
             "status": "completed",

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import httpx
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from agrireg_agent.answering import answer_without_graph, document_answer
 from agrireg_agent.clients import ControlledTools, DeepSeekClient
@@ -74,10 +75,23 @@ def test_relationship_report_reconstructs_order_and_checks_each_link(tmp_path):
     assert "「00A657-62」的登记作物包括「春大麦」" in good["report"]
     assert "[1]" in good["report"] and "[2]" in good["report"]
     assert "APPLIED_TO" not in good["report"]
+    report_event = next(item for item in good["events"] if item["kind"] == "report_ready")
+    diagram, = report_event["payload"]["relationPaths"]
+    assert [node["id"] for node in diagram["nodes"]] == ["2", "1", "3"]
+    assert [link["label"] for link in diagram["links"]] == ["有效成分", "登记作物"]
+    verified = {item["index"]: item["summary"] for item in good["verified_evidence"]}
+    assert "的有效成分包括「Chlorantraniliprole」" in verified[diagram["links"][0]["evidenceIndex"]]
+    assert "的登记作物包括「春大麦」" in verified[diagram["links"][1]["evidenceIndex"]]
+    approval_config = {"configurable": {"thread_id": "review"}}
+    waiting = graph.invoke(question | {"require_approval": True}, approval_config)
+    assert waiting["__interrupt__"][0].value["kind"] == "approval"
+    denied = graph.invoke(Command(resume={"decision": "reject"}), approval_config)
+    assert all("relationPaths" not in item["payload"] for item in denied["events"])
     edges.pop()
     broken = graph.invoke(question, {"configurable": {"thread_id": "broken"}})
     assert "完整路径" in broken["report"] and "Chlorantraniliprole →" not in broken["report"]
     assert broken["tool_results"][0]["outcome"] == "partial"
+    assert all("relationPaths" not in item["payload"] for item in broken["events"])
 
 
 def test_focused_registry_answer_restores_words_split_between_snapshot_chunks():
