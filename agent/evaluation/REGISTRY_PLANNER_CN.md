@@ -73,3 +73,29 @@ agrireg-planner-sft train --base /path/to/Qwen3-1.7B \
 python evaluation/evaluate_registry_planner.py --data evaluation/registry_planner_v1 \
   --base /path/to/Qwen3-1.7B --run runs/registry-planner-v1-s42 --four-bit
 ```
+
+## 第 4、5 轮续训
+
+续训以第 3 轮的 `checkpoint-525` 初始化，沿用 700 条训练样本、有效批量 4 和 seed 42。原 checkpoint 只保存了模型权重，因此续训重新初始化优化器，学习率从 5e-5 线性降至 0。每 175 个优化步保存一次，用同一个验证集、评分和解码设置比较三个权重。此设置验证低学习率续训的收益。
+
+```bash
+agrireg-planner-sft train --base /path/to/Qwen3-1.7B \
+  --dataset evaluation/registry_planner_v1/train.jsonl --output runs/registry-planner-v1-s42-extension \
+  --init-adapter runs/registry-planner-v1-s42/checkpoint-525 --learning-rate 5e-5 \
+  --steps 350 --save-steps 175 --four-bit --seed 42
+python evaluation/evaluate_registry_planner.py --data evaluation/registry_planner_v1 \
+  --base /path/to/Qwen3-1.7B --four-bit --output runs/registry-planner-v1-s42-extension/dev-check \
+  --dev-checkpoint 3 runs/registry-planner-v1-s42/checkpoint-525 \
+  --dev-checkpoint 4 runs/registry-planner-v1-s42-extension/checkpoint-175 \
+  --dev-checkpoint 5 runs/registry-planner-v1-s42-extension/checkpoint-350
+```
+
+| Epoch | 验证综合分 | 齐全题关键动作正确 | 有效追问 | 缺参拟调用 |
+| --- | ---: | ---: | ---: | ---: |
+| 3 | 70.0% | 54/60 | 20/40 | 16/40 |
+| 4 | 71.7% | 53/60 | 22/40 | 16/40 |
+| **5** | **74.2%** | **53/60** | **24/40** | **15/40** |
+
+两轮续训实际增加 350 个优化步，用时 573.8 秒。第 3 轮复评复现原验证计数。第 5 轮综合分高 4.2 个百分点，有效追问多 4 道，齐全题正确动作少 1 道。第 5 轮是这个验证集上的续训候选。完整冻结测试结果见前文的第 3 轮报告。
+
+一次续训尝试因非有限梯度中止。切回首轮实验所用的 RTX 3090 后，四步诊断和正式续训均通过，三个适配器的权重均为有限值。验证与权重指纹见 [续训记录](registry_planner_v1/results/seed42/epoch_extension.json)。

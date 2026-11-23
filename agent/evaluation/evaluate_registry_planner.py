@@ -16,6 +16,7 @@ from agrireg_agent.planner_sft import BASE_MODEL, _decode_json, _generate_batch,
 
 
 STEPS_BY_EPOCH = {1: 175, 2: 350, 3: 525}
+SELECTION = "max_mean_of_ready_critical_action_and_correct_non_call_clarification_rates; fewer_missing_calls; earlier_epoch"
 Predict = Callable[[list[dict]], dict[str, str]]
 
 
@@ -52,6 +53,41 @@ def choose_epoch(results: dict[int, dict]) -> int:
     return max(results, key=lambda epoch: (
         balance(results[epoch]), -results[epoch]["decision_checks"]["missing_parameters"]["proposed_call"], -epoch,
     ))
+
+
+def score_development(base: str, checkpoints: dict[int, Path], dev: list[dict], four_bit: bool, batch_size: int):
+    if batch_size < 1:
+        raise ValueError("Batch size must be positive.")
+    first_epoch = min(checkpoints)
+    tokenizer, model = _load_model(base, "cuda", str(checkpoints[first_epoch]), four_bit)
+    adapter_names = {first_epoch: "default"}
+    results = {}
+    for epoch, path in sorted(checkpoints.items()):
+        if epoch != first_epoch:
+            adapter_names[epoch] = f"epoch_{epoch}"
+            model.load_adapter(str(path), adapter_names[epoch], is_trainable=False)
+        model.set_adapter(adapter_names[epoch])
+        model.eval()
+        print(f"Dev epoch {epoch}: {len(dev)} examples", flush=True)
+        metrics = _score_plans(dev, generations(tokenizer, model, dev, batch_size))
+        results[epoch] = metrics | {"balanced_score": float(balance(metrics))}
+    return tokenizer, model, adapter_names, results
+
+
+def compare_development(
+    data: Path, output: Path, base: str, checkpoints: dict[int, Path], four_bit: bool, batch_size: int,
+) -> None:
+    dev, digest = frozen_split(data, "dev")
+    output.mkdir(parents=True, exist_ok=False)
+    started = perf_counter()
+    _, _, _, results = score_development(base, checkpoints, dev, four_bit, batch_size)
+    selected = choose_epoch(results)
+    write_json(output / "development.json", {
+        "dataset_sha256": digest, "selected_epoch": selected, "epochs": results, "selection": SELECTION,
+        "four_bit": four_bit, "decoding": "greedy", "batch_size": batch_size,
+        "wall_seconds": round(perf_counter() - started, 3),
+    })
+    print(f"Selected epoch {selected} on dev. Results saved under {output}", flush=True)
 
 
 def step_evidence(tool: str, args: dict[str, str], snapshot: dict) -> set[str]:
@@ -186,8 +222,6 @@ def score_test(
 
 
 def evaluate(data: Path, run: Path, output: Path, base: str, four_bit: bool, batch_size: int) -> None:
-    if batch_size < 1:
-        raise ValueError("Batch size must be positive.")
     train_metrics = json.loads((run / "training_metrics.json").read_text(encoding="utf-8"))
     train_rows, train_digest = frozen_split(data, "train")
     if (
@@ -197,27 +231,18 @@ def evaluate(data: Path, run: Path, output: Path, base: str, four_bit: bool, bat
         raise ValueError("Training metrics must match the frozen 3-epoch run and its quantization.")
     dev, dev_digest = frozen_split(data, "dev")
     output.mkdir(parents=True, exist_ok=False)
-    tokenizer, model = _load_model(base, "cuda", str(run / f"checkpoint-{STEPS_BY_EPOCH[1]}"), four_bit)
-    model.eval()
+    checkpoints = {epoch: run / f"checkpoint-{step}" for epoch, step in STEPS_BY_EPOCH.items()}
+    tokenizer, model, adapter_names, results = score_development(base, checkpoints, dev, four_bit, batch_size)
+    for epoch, metrics in results.items():
+        metrics["optimizer_steps"] = STEPS_BY_EPOCH[epoch]
 
     def predict(rows: list[dict]) -> dict[str, str]:
         return generations(tokenizer, model, rows, batch_size)
 
-    adapter_names = {1: "default"}
-    results = {}
-    for epoch, optimizer_step in STEPS_BY_EPOCH.items():
-        if epoch != 1:
-            adapter_names[epoch] = f"epoch_{epoch}"
-            model.load_adapter(str(run / f"checkpoint-{optimizer_step}"), adapter_names[epoch], is_trainable=False)
-        model.set_adapter(adapter_names[epoch])
-        model.eval()
-        print(f"Dev epoch {epoch}: {len(dev)} examples", flush=True)
-        metrics = _score_plans(dev, predict(dev))
-        results[epoch] = metrics | {"balanced_score": float(balance(metrics)), "optimizer_steps": optimizer_step}
     selected = choose_epoch(results)
     development = {
         "dataset_sha256": dev_digest, "selected_epoch": selected, "epochs": results,
-        "selection": "max_mean_of_ready_critical_action_and_correct_non_call_clarification_rates; fewer_missing_calls; earlier_epoch",
+        "selection": SELECTION,
     }
     write_json(output / "development.json", development)
     print(f"Selected epoch {selected} on dev; opening the test split.", flush=True)
@@ -247,15 +272,30 @@ def evaluate(data: Path, run: Path, output: Path, base: str, four_bit: bool, bat
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
-    parser.add_argument("--run", type=Path)
-    parser.add_argument("--output", type=Path, help="New evaluation directory; defaults to RUN/evaluation.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--run", type=Path)
+    mode.add_argument("--dev-checkpoint", action="append", nargs=2, metavar=("EPOCH", "ADAPTER"),
+                      help="Compare this epoch and local adapter on dev only. Pass at least twice.")
+    parser.add_argument("--output", type=Path, help="New evaluation directory. Defaults to RUN/evaluation with --run.")
     parser.add_argument("--base", default=BASE_MODEL)
     parser.add_argument("--four-bit", action="store_true")
     parser.add_argument("--batch-size", type=int, default=12)
     args = parser.parse_args()
-    if args.run is None:
+    if args.run is not None:
+        evaluate(args.data, args.run, args.output or args.run / "evaluation", args.base, args.four_bit, args.batch_size)
+    elif args.dev_checkpoint:
+        try:
+            checkpoints = {int(epoch): Path(path) for epoch, path in args.dev_checkpoint}
+        except ValueError:
+            parser.error("Each checkpoint epoch must be an integer.")
+        if len(checkpoints) < 2 or len(checkpoints) != len(args.dev_checkpoint) or min(checkpoints) < 1:
+            parser.error("Provide at least two distinct positive checkpoint epochs.")
+        if args.output is None:
+            parser.error("--dev-checkpoint requires --output.")
+        if any(not (path / "adapter_config.json").is_file() for path in checkpoints.values()):
+            parser.error("Each checkpoint must point to a local adapter directory.")
+        compare_development(args.data, args.output, args.base, checkpoints, args.four_bit, args.batch_size)
+    else:
         test, _ = frozen_split(args.data, "test")
         snapshot, replay, recovered, digests = load_fixtures(args.data, test)
         print(json.dumps({"test": len(test), "recovered": len(recovered), **digests}, indent=2))
-    else:
-        evaluate(args.data, args.run, args.output or args.run / "evaluation", args.base, args.four_bit, args.batch_size)
