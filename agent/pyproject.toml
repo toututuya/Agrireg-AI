@@ -18,6 +18,7 @@ documents = [
   "pymilvus>=2.6.3,<2.7",
   "sentence-transformers>=4.1,<6"
 ]
+mcp = ["mcp>=1.25,<2"]
 dev = [
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7"
@@ -26,6 +27,7 @@ dev = [
 [project.scripts]
 agrireg-agent = "agrireg_agent.api:run"
 agrireg-documents = "agrireg_agent.documents:main"
+agrireg-mcp = "agrireg_agent.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=75"]

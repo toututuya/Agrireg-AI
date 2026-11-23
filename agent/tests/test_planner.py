@@ -1,6 +1,4 @@
-from agrireg_agent.config import Settings
-from agrireg_agent.clients import DeepSeekClient
-from agrireg_agent.planner import fallback_plan
+from agrireg_agent.planner import fallback_plan, parse_plan
 
 
 def test_comparison_plan_uses_bounded_tools():
@@ -12,7 +10,6 @@ def test_comparison_plan_uses_bounded_tools():
         "compare_entities",
         "external_substance_lookup",
         "external_substance_lookup",
-        "grounded_answer",
     ]
 
 
@@ -26,4 +23,18 @@ def test_fallback_extracts_latin_substance_name():
     plan = fallback_plan("Chlorantraniliprole 与哪些病虫害有关？")
     assert plan.entities == ["Chlorantraniliprole"]
     assert plan.steps[0].arguments["keyword"] == "Chlorantraniliprole"
+
+
+def test_guessed_comparison_target_is_rejected():
+    plan = fallback_plan("比较 'Abamectin' 与 'Chlorantraniliprole'")
+
+    assert parse_plan(plan.model_dump(), "比较 'Abamectin'", False) is None
+
+
+def test_registration_uses_filtered_document_lookup():
+    plan = fallback_plan("PD20230017 的登记证有效期", documents_enabled=True)
+
+    assert plan.steps[0].tool == "search_documents"
+    assert plan.steps[0].arguments["registration_number"] == "PD20230017"
+    assert all(step.tool != "external_substance_lookup" for step in plan.steps)
 

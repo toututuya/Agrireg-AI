@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from functools import cached_property
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from .config import Settings
+from .documents import DocumentSearchRequest, build_document_search
 
 
 class DeepSeekClient:
@@ -19,7 +21,7 @@ class DeepSeekClient:
         return self.settings.deepseek_enabled and bool(self.settings.deepseek_api_key)
 
     def json_completion(self, system: str, user: str) -> dict[str, Any] | None:
-        text = self._completion(system, user, json_mode=True)
+        text = self._completion(system, user)
         if not text:
             return None
         try:
@@ -33,22 +35,18 @@ class DeepSeekClient:
                     return None
         return None
 
-    def report_completion(self, system: str, user: str) -> str:
-        return self._completion(system, user, json_mode=False) or ""
-
-    def _completion(self, system: str, user: str, json_mode: bool) -> str:
+    def _completion(self, system: str, user: str) -> str:
         if not self.enabled:
             return ""
         payload: dict[str, Any] = {
             "model": self.settings.deepseek_model,
             "temperature": 0.1,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
         try:
             with httpx.Client(
                 base_url=self.settings.deepseek_base_url.rstrip("/"),
@@ -80,11 +78,42 @@ class ControlledTools:
             "find_relation_path": self.find_relation_path,
             "grounded_answer": lambda **_: self.grounded_answer(question),
             "external_substance_lookup": self.external_substance_lookup,
+            "search_documents": self.search_documents,
         }
         handler = handlers.get(name)
         if handler is None:
             raise ValueError(f"Unsupported controlled tool: {name}")
         return handler(**arguments)
+
+    @cached_property
+    def documents(self):
+        return build_document_search(self.settings)
+
+    def search_documents(self, query: str, registration_number: str = "") -> dict[str, Any]:
+        if self.documents is None:
+            raise RuntimeError("Document search is not configured.")
+        request = DocumentSearchRequest(query=query, registration_number=registration_number)
+        hits = self.documents.search(request)
+        evidence = [
+            {
+                "id": f"document:{hit.chunk_id}",
+                "source": "登记文档",
+                "title": f"{hit.title} · {f'第 {hit.page} 页' if hit.page else hit.section}",
+                "kind": "document_excerpt",
+                "summary": hit.text,
+                "url": str(hit.source_url),
+                "properties": {
+                    "documentId": hit.document_id, "version": hit.version, "page": hit.page,
+                    "section": hit.section, "registrationNumber": hit.registration_number,
+                },
+            }
+            for hit in hits
+        ]
+        return {
+            "tool": "search_documents",
+            "summary": f"找到 {len(hits)} 段登记文档原文。",
+            "evidence": evidence,
+        }
 
     def search_entity(self, keyword: str) -> dict[str, Any]:
         payload = self._graph_get("/api/graph/search", {"keyword": keyword})

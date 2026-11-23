@@ -12,6 +12,7 @@ ToolName = Literal[
     "find_relation_path",
     "grounded_answer",
     "external_substance_lookup",
+    "search_documents",
 ]
 
 
@@ -36,6 +37,9 @@ class AgentState(TypedDict, total=False):
     require_approval: bool
     plan: dict[str, Any]
     step_index: int
+    context: dict[str, Any]
+    clarification_count: int
+    replanned: bool
     tool_results: Annotated[list[dict[str, Any]], operator.add]
     evidence: Annotated[list[dict[str, Any]], operator.add]
     verified_evidence: list[dict[str, Any]]
