@@ -32,6 +32,7 @@ Copy-Item .env.example .env.local
 
 从本目录安装可选依赖，按 `.env.example` 配置 `AGENT_MILVUS_URI`。`AGENT_RETRIEVAL_DEVICE` 可以填 `cpu` 或 `cuda:0`。模型在相应检索模式第一次运行时加载。
 离线使用时，可在 `AGENT_EMBEDDING_MODEL` 和 `AGENT_RERANKER_MODEL` 中指定相应模型权重的本地目录。
+本地开发可补装 `milvus-lite>=3.2.2,<4` 和 `jieba`，并把 `AGENT_MILVUS_URI` 指向新的 `.db` 文件。
 
 ~~~bash
 python -m pip install -e ".[documents]"
