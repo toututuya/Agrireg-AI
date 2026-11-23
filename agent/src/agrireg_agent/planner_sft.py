@@ -230,7 +230,7 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
         "cases": len(rows), "json": totals["json"], "valid": totals["valid"],
         "intent_and_tool": totals["intent_and_tool"], "exact_actions": totals["exact_actions"],
         "latency_cases": len(latencies),
-        "p50_ms": round(median(latencies)), "p95_ms": round(sorted(latencies)[math.ceil(len(rows) * 0.95) - 1]),
+        "p50_ms": round(median(latencies)), "p95_ms": round(sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1]),
         "by_intent": {kind: dict(counts) for kind, counts in by_kind.items()},
     }
 

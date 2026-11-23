@@ -1,3 +1,6 @@
+import json
+
+from agrireg_agent import planner_sft
 from agrireg_agent.models import TaskPlan
 from agrireg_agent.planner import parse_plan
 from agrireg_agent.planner_data import make_dataset
@@ -39,3 +42,18 @@ def test_sft_loss_masks_prompt_and_keeps_assistant_eos():
 def test_qwen_without_adapter_defers_to_fallback():
     planner = LocalQwenPlanner("base", "", "cpu")
     assert planner.json_completion("system", "request") is None
+
+
+def test_heldout_metrics_use_latency_sample_count(monkeypatch):
+    rows = make_dataset("test")
+    answers = {row["input"]: json.dumps(row["plan"], ensure_ascii=False) for row in rows}
+    monkeypatch.setattr(planner_sft, "_generate", lambda tokenizer, model, system, user: answers[user])
+    monkeypatch.setattr(
+        planner_sft, "_generate_batch", lambda tokenizer, model, system, users: [answers[user] for user in users],
+    )
+
+    result = planner_sft._measure(None, None, rows)
+
+    assert result["exact_actions"] == result["cases"] == 42
+    assert result["latency_cases"] == 7
+    assert 0 <= result["p50_ms"] <= result["p95_ms"]
