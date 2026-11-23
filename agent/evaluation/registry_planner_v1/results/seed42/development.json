@@ -1,0 +1,240 @@
+{
+  "dataset_sha256": "f1c01aa300d01dbd3ca912b99d2eb9243cf8634003830d27286e66d429e6c39d",
+  "selected_epoch": 3,
+  "epochs": {
+    "1": {
+      "cases": 100,
+      "json": 100,
+      "valid": 95,
+      "intent_and_tool": 59,
+      "exact_actions": 58,
+      "decision_checks": {
+        "missing_parameters": {
+          "cases": 40,
+          "proposed_call": 25,
+          "matched_clarification_without_call": 10
+        },
+        "ready": {
+          "cases": 60,
+          "unnecessary_clarification": 1,
+          "matched_critical_actions": 49
+        }
+      },
+      "by_intent": {
+        "document": {
+          "cases": 20,
+          "clarified": 0,
+          "exact_actions": 20
+        },
+        "missing_registration": {
+          "cases": 20,
+          "clarified": 5,
+          "exact_actions": 5
+        },
+        "comparison": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 5
+        },
+        "missing_comparison": {
+          "cases": 10,
+          "clarified": 5,
+          "exact_actions": 5
+        },
+        "external": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 2
+        },
+        "path": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 10
+        },
+        "missing_path": {
+          "cases": 10,
+          "clarified": 5
+        },
+        "graph": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "compliance": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 2
+        },
+        "keyword_document": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 3
+        },
+        "joint_lookup": {
+          "cases": 4,
+          "clarified": 1,
+          "exact_actions": 2
+        }
+      },
+      "balanced_score": 0.5333333333333333,
+      "optimizer_steps": 175
+    },
+    "2": {
+      "cases": 100,
+      "json": 100,
+      "valid": 94,
+      "intent_and_tool": 77,
+      "exact_actions": 71,
+      "decision_checks": {
+        "missing_parameters": {
+          "cases": 40,
+          "proposed_call": 16,
+          "matched_clarification_without_call": 19
+        },
+        "ready": {
+          "cases": 60,
+          "unnecessary_clarification": 1,
+          "matched_critical_actions": 53
+        }
+      },
+      "by_intent": {
+        "document": {
+          "cases": 20,
+          "clarified": 0,
+          "exact_actions": 20
+        },
+        "missing_registration": {
+          "cases": 20,
+          "clarified": 9,
+          "exact_actions": 9
+        },
+        "comparison": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 6
+        },
+        "missing_comparison": {
+          "cases": 10,
+          "clarified": 5,
+          "exact_actions": 5
+        },
+        "external": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "path": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 10
+        },
+        "missing_path": {
+          "cases": 10,
+          "clarified": 10,
+          "exact_actions": 5
+        },
+        "graph": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 3
+        },
+        "compliance": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "keyword_document": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 3
+        },
+        "joint_lookup": {
+          "cases": 4,
+          "clarified": 1,
+          "exact_actions": 2
+        }
+      },
+      "balanced_score": 0.6791666666666667,
+      "optimizer_steps": 350
+    },
+    "3": {
+      "cases": 100,
+      "json": 100,
+      "valid": 95,
+      "intent_and_tool": 78,
+      "exact_actions": 73,
+      "decision_checks": {
+        "missing_parameters": {
+          "cases": 40,
+          "proposed_call": 16,
+          "matched_clarification_without_call": 20
+        },
+        "ready": {
+          "cases": 60,
+          "unnecessary_clarification": 1,
+          "matched_critical_actions": 54
+        }
+      },
+      "by_intent": {
+        "document": {
+          "cases": 20,
+          "clarified": 0,
+          "exact_actions": 20
+        },
+        "missing_registration": {
+          "cases": 20,
+          "clarified": 9,
+          "exact_actions": 9
+        },
+        "comparison": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 6
+        },
+        "missing_comparison": {
+          "cases": 10,
+          "clarified": 5,
+          "exact_actions": 5
+        },
+        "external": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "path": {
+          "cases": 10,
+          "clarified": 0,
+          "exact_actions": 10
+        },
+        "missing_path": {
+          "cases": 10,
+          "clarified": 10,
+          "exact_actions": 6
+        },
+        "graph": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "compliance": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 4
+        },
+        "keyword_document": {
+          "cases": 4,
+          "clarified": 0,
+          "exact_actions": 3
+        },
+        "joint_lookup": {
+          "cases": 4,
+          "clarified": 1,
+          "exact_actions": 2
+        }
+      },
+      "balanced_score": 0.7,
+      "optimizer_steps": 525
+    }
+  },
+  "selection": "max_mean_of_ready_critical_action_and_correct_non_call_clarification_rates; fewer_missing_calls; earlier_epoch"
+}

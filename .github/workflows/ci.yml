@@ -65,6 +65,11 @@ jobs:
         run: pytest
       - name: Evaluate deterministic routing contract
         run: python evaluation/run_eval.py
+      - name: Validate frozen registry planner benchmark
+        run: |
+          agrireg-planner-sft check-data --train evaluation/registry_planner_v1/train.jsonl \
+            --dev evaluation/registry_planner_v1/dev.jsonl --test evaluation/registry_planner_v1/test.jsonl
+          python evaluation/evaluate_registry_planner.py --data evaluation/registry_planner_v1
 
   evaluation:
     name: Evaluation scripts

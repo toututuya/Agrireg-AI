@@ -1,0 +1,11 @@
+{
+  "base": "Qwen/Qwen3-1.7B",
+  "seed": 42,
+  "four_bit": true,
+  "rows": 700,
+  "optimizer_steps": 525,
+  "dataset_sha256": "87083dae9c6146f6374db1a81bf59ffe80644ca4d593ec5cc9a6b0291e6c7c03",
+  "loss": 0.0394106826906292,
+  "peak_allocated_mib": 3239,
+  "seconds": 867.8823
+}
