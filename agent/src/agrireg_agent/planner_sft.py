@@ -61,21 +61,29 @@ def _load_model(base: str, device: str, adapter: str = "", four_bit: bool = Fals
     return tokenizer, model if four_bit else model.to(device)
 
 
-def _generate(tokenizer, model, system: str, user: str) -> str:
+def _generate_batch(tokenizer, model, system: str, users: list[str]) -> list[str]:
     import torch
     from transformers import GenerationConfig
 
-    prompt = _prompt(tokenizer, system, user)
-    inputs = torch.tensor([prompt], device=model.device)
+    prompts = [_prompt(tokenizer, system, user) for user in users]
+    width = max(map(len, prompts))
+    inputs = torch.tensor([[tokenizer.pad_token_id] * (width - len(prompt)) + prompt for prompt in prompts],
+                          device=model.device)
+    mask = torch.tensor([[0] * (width - len(prompt)) + [1] * len(prompt) for prompt in prompts],
+                        device=model.device)
     generation = GenerationConfig.from_model_config(model.config)
-    generation.do_sample = False
     generation.max_new_tokens = MAX_GENERATION
     generation.pad_token_id = tokenizer.pad_token_id
     with torch.inference_mode():
         output = model.generate(
-            input_ids=inputs, attention_mask=torch.ones_like(inputs), generation_config=generation,
+            input_ids=inputs, attention_mask=mask, generation_config=generation,
+            use_model_defaults=False, do_sample=False,
         )
-    return tokenizer.decode(output[0, len(prompt):], skip_special_tokens=True).strip()
+    return [text.strip() for text in tokenizer.batch_decode(output[:, width:], skip_special_tokens=True)]
+
+
+def _generate(tokenizer, model, system: str, user: str) -> str:
+    return _generate_batch(tokenizer, model, system, [user])[0]
 
 
 def _decode_json(text: str) -> dict[str, Any] | None:
@@ -175,12 +183,25 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
     totals = Counter()
     latencies = []
     by_kind: dict[str, Counter] = {}
+    first_per_kind = {}
+    for row in rows:
+        first_per_kind.setdefault(row["kind"], row["id"])
+    latency_ids = set(first_per_kind.values())
+    texts: dict[str, str] = {}
     _generate(tokenizer, model, PLANNER_SYSTEM, rows[0]["input"])
     for row in rows:
+        if row["id"] not in latency_ids:
+            continue
         started = perf_counter()
-        text = _generate(tokenizer, model, PLANNER_SYSTEM, row["input"])
+        texts[row["id"]] = _generate(tokenizer, model, PLANNER_SYSTEM, row["input"])
         latencies.append((perf_counter() - started) * 1000)
-        decoded = _decode_json(text)
+    remaining = [row for row in rows if row["id"] not in latency_ids]
+    for start in range(0, len(remaining), 4):
+        batch = remaining[start:start + 4]
+        generations = _generate_batch(tokenizer, model, PLANNER_SYSTEM, [row["input"] for row in batch])
+        texts.update((row["id"], text) for row, text in zip(batch, generations, strict=True))
+    for row in rows:
+        decoded = _decode_json(texts[row["id"]])
         expected = TaskPlan.model_validate(row["plan"])
         predicted = parse_plan(decoded, row["question"], documents_enabled=True)
         scope = by_kind.setdefault(row["kind"], Counter())
@@ -208,6 +229,7 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
     return {
         "cases": len(rows), "json": totals["json"], "valid": totals["valid"],
         "intent_and_tool": totals["intent_and_tool"], "exact_actions": totals["exact_actions"],
+        "latency_cases": len(latencies),
         "p50_ms": round(median(latencies)), "p95_ms": round(sorted(latencies)[math.ceil(len(rows) * 0.95) - 1]),
         "by_intent": {kind: dict(counts) for kind, counts in by_kind.items()},
     }
@@ -217,11 +239,13 @@ def evaluate(base: str, adapter: str, output: Path, seed: int, four_bit: bool = 
     tokenizer, model = _load_model(base, "cuda", adapter, four_bit)
     model.eval()
     rows = make_dataset("test", seed)
+    print(f"Evaluating base model on {len(rows)} held-out cases.", flush=True)
     with model.disable_adapter():
         baseline = _measure(tokenizer, model, rows)
+    print(f"Evaluating LoRA adapter on the same {len(rows)} cases.", flush=True)
     tuned = _measure(tokenizer, model, rows)
     results = {
-        "data": "synthetic_entity_and_template_holdout", "seed": seed, "four_bit": four_bit,
+        "data": "synthetic_entity_and_template_holdout", "seed": seed, "four_bit": four_bit, "decoding": "greedy",
         "baseline": baseline, "lora": tuned,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
