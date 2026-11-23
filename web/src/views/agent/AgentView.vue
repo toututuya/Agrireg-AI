@@ -1,182 +1,202 @@
 <template>
   <section class="agent-page">
-    <header class="agent-hero">
+    <header class="view-heading">
       <div>
-        <p>AGRIREG INTELLIGENCE · ANALYSIS AGENT</p>
-        <h1>把复杂问题拆成可核验的任务</h1>
-        <span>沿知识图谱检索实体与关系，交叉核对外部来源，保留每一步证据后生成报告。</span>
+        <h1>任务分析</h1>
+        <p>比较登记或核验关联，按步骤查看证据、待确认差异和分析报告。</p>
       </div>
-      <router-link to="/ask" class="quick-link">
-        只问一个问题
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-      </router-link>
+      <div class="view-actions">
+        <button v-if="activeRun || activeThreadId" class="ui-button primary" type="button" :disabled="starting || resuming" @click="newTask">
+          <UiIcon name="plus" /> 新建任务
+        </button>
+        <router-link to="/ask" class="ui-button">只问一个问题 <UiIcon name="arrow" /></router-link>
+      </div>
     </header>
 
     <div class="agent-grid">
-      <aside class="thread-rail" aria-label="分析任务记录">
-        <div class="rail-heading">
-          <div><span>任务记录</span><strong>最近分析</strong></div>
-          <button type="button" aria-label="新建分析任务" title="新建分析任务" @click="newTask">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          </button>
-        </div>
-        <p v-if="threadsLoading" class="rail-state" role="status">正在载入任务…</p>
-        <p v-else-if="threadsError" class="rail-state error" role="alert">{{ threadsError }}</p>
-        <nav v-else-if="threads.length" :class="['thread-list', { expanded: historyExpanded }]" aria-label="最近分析列表">
-          <button
-            v-for="thread in threads"
-            :key="thread.id"
-            type="button"
-            :class="['thread-item', { active: thread.id === activeThreadId }]"
-            :aria-current="thread.id === activeThreadId ? 'page' : undefined"
-            @click="openThread(thread)"
-          >
-            <span>{{ thread.title }}</span>
-            <small>{{ threadStatus(thread.latestStatus) }} · {{ formatTime(thread.updatedAt) }}</small>
-          </button>
-        </nav>
-        <button
-          v-if="threads.length > 2"
-          type="button"
-          class="history-disclosure"
-          :aria-expanded="historyExpanded ? 'true' : 'false'"
-          @click="historyExpanded = !historyExpanded"
-        >{{ historyExpanded ? '收起任务记录' : `查看全部 ${threads.length} 条任务` }}</button>
-        <div v-else class="rail-empty">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>
-          <strong>还没有分析任务</strong>
-          <span>开始后，计划、证据和报告会保存在这里。</span>
-        </div>
-      </aside>
-
       <div class="task-column" role="region" aria-label="任务工作区">
-        <section v-if="!activeRun" class="task-starter" aria-labelledby="agent-start-title">
-          <span class="eyebrow">多步骤分析</span>
-          <h2 id="agent-start-title">你希望核验什么？</h2>
-          <p>适合成分对比、关系路径、登记与风险初筛。单一事实查询可以继续使用 AI 问答。</p>
-          <div class="starter-grid">
-            <button v-for="item in starters" :key="item.title" type="button" @click="question = item.question">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon"/></svg>
-              <strong>{{ item.title }}</strong>
-              <span>{{ item.description }}</span>
-            </button>
-          </div>
-        </section>
+        <div v-if="runLoading" class="task-loading" role="status">
+          <span aria-hidden="true" class="ui-skeleton"></span> 正在恢复任务…
+        </div>
 
-        <section v-else class="run-card" aria-labelledby="active-task-title">
-          <div class="run-heading">
-            <div>
-              <span class="eyebrow">当前任务</span>
-              <h2 id="active-task-title">{{ activeRun.question }}</h2>
-            </div>
-            <span :class="['run-status', statusTone(activeRun.status)]">
+        <div v-if="runError" class="ui-error run-error" role="alert">
+          <p>{{ runError }}</p>
+          <button v-if="activeRun" class="ui-button" type="button" @click="refreshRun(activeRun.threadId, activeRun.id)">刷新任务状态</button>
+          <button v-else-if="activeThreadId" class="ui-button" type="button" @click="openThread({ id: activeThreadId })">重新打开任务</button>
+        </div>
+
+        <section v-if="activeRun" class="run-card" aria-labelledby="active-task-title">
+          <div ref="runHeading" class="run-heading" tabindex="-1">
+            <h2 id="active-task-title">{{ activeRun.question }}</h2>
+            <span class="run-status" :class="statusTone(activeRun.status)" role="status">
               <i aria-hidden="true"></i>{{ runStatus(activeRun.status) }}
             </span>
           </div>
 
           <ol class="progress-steps" aria-label="分析进度">
-            <li v-for="(stage, index) in stages" :key="stage.key" :class="stageState(stage.key)">
-              <span>{{ index + 1 }}</span>
-              <div><strong>{{ stage.title }}</strong><small>{{ stage.caption }}</small></div>
+            <li v-for="(stage, index) in stages" :key="stage.key" :class="stage.state"
+              :aria-current="stage.state === 'current' ? 'step' : undefined">
+              <span class="step-marker" aria-hidden="true"><UiIcon v-if="stage.state === 'done'" name="check" /><template v-else>{{ index + 1 }}</template></span>
+              <div>
+                <strong>{{ stage.title }}</strong>
+                <small>{{ stage.state === 'done' ? '已完成' : stage.state === 'current' ? '进行中' : '待开始' }}</small>
+              </div>
             </li>
           </ol>
 
-          <section v-if="activeRun.interrupt" class="decision-card" aria-live="polite">
-            <div class="decision-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg>
-            </div>
+          <section v-if="pendingKind" class="decision-card" aria-labelledby="decision-title">
+            <UiIcon name="alert" />
             <div>
-              <span>{{ activeRun.interrupt.kind === 'approval' ? '等待确认' : '需要补充' }}</span>
-              <h3>{{ activeRun.interrupt.title }}</h3>
-              <p>{{ activeRun.interrupt.message }}</p>
-              <div v-if="activeRun.interrupt.kind === 'approval'" class="decision-actions">
-                <button type="button" class="approve" :disabled="resuming" @click="resume({ decision: 'approve' })">确认生成报告</button>
-                <button type="button" class="reject" :disabled="resuming" @click="resume({ decision: 'reject' })">停止并保留证据</button>
+
+              <h3 id="decision-title">{{ decisionTitle }}</h3>
+              <p v-if="activeRun.interrupt && activeRun.interrupt.message" class="decision-message">{{ activeRun.interrupt.message }}</p>
+              <p v-if="pendingKind === 'approval' && lastClarification" class="clarification-summary">
+                <strong>已补充</strong> {{ lastClarification.detail }}
+              </p>
+              <div v-if="pendingKind === 'approval'" class="decision-actions">
+                <button class="ui-button primary" type="button" :disabled="resuming" @click="resume({ decision: 'approve' })">批准并生成报告</button>
+                <button class="ui-button" type="button" :disabled="resuming" @click="resume({ decision: 'reject' })">拒绝并保留证据</button>
               </div>
-              <form v-else class="clarification-form" @submit.prevent="resume(clarification)">
+              <form v-else-if="pendingKind === 'clarification'" class="clarification-form" @submit.prevent="submitClarification">
                 <label for="clarification-input">补充信息</label>
-                <input id="clarification-input" v-model.trim="clarification" maxlength="160" :disabled="resuming" aria-describedby="clarification-help">
-                <small id="clarification-help">例如补充第二个有效成分、登记产品或关系终点。</small>
-                <button type="submit" :disabled="resuming || clarification.length < 2">继续分析</button>
+                <input id="clarification-input" ref="clarification" class="ui-input" v-model.trim="clarification"
+                  required minlength="2" maxlength="160" :disabled="resuming"
+                   :aria-describedby="formError ? 'clarification-help clarification-error' : 'clarification-help'">
+                <small id="clarification-help">请输入缺少的实体名称或登记号，至少 2 个字。</small>
+                <button class="ui-button primary" type="submit" :disabled="resuming">继续分析</button>
               </form>
+              <button v-else class="ui-button primary" type="button" :disabled="resuming" @click="resume(null)">恢复任务</button>
+              <p v-if="resuming" class="action-status" role="status">正在提交，任务状态即将更新…</p>
+              <p v-if="formError" id="clarification-error" class="ui-error decision-error" role="alert">{{ formError }}</p>
             </div>
           </section>
 
-          <section class="timeline" aria-labelledby="timeline-title">
-            <div class="section-heading"><div><span>执行记录</span><h3 id="timeline-title">任务时间线</h3></div><small>{{ events.length }} 条记录</small></div>
-            <ol v-if="events.length">
-              <li v-for="item in events" :key="item.seq || `${item.kind}-${item.title}`">
-                <span :class="['timeline-icon', eventTone(item.kind)]" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path :d="eventIcon(item.kind)"/></svg>
+          <p v-else-if="activeRun.status === 'failed'" class="ui-error" role="alert">分析未能完成。已保留任务进度，可以重新发起。</p>
+
+          <article v-if="activeRun.report" class="report" aria-labelledby="report-title">
+            <h3 id="report-title">分析报告</h3>
+            <div class="report-body">
+              <component v-for="(block, index) in reportBlocks" :is="block.list ? 'ul' : 'div'" :key="index">
+                <component v-for="(row, rowIndex) in block.rows" :is="row.tag" :key="rowIndex">
+                  <template v-for="(part, partIndex) in row.parts">
+                    <button v-if="part.fact" :key="'cite-' + partIndex" class="report-citation" type="button"
+                      :aria-label="'查看第 ' + part.fact.index + ' 条证据'" @click="focusEvidence(part.fact)">
+                      [{{ part.fact.index }}]
+                    </button>
+                    <span v-else :key="'text-' + partIndex">{{ part.text }}</span>
+                  </template>
+                </component>
+              </component>
+            </div>
+          </article>
+
+          <details v-if="events.length" class="timeline">
+            <summary><strong>执行记录</strong><span>{{ events.length }} 条</span></summary>
+            <ol>
+              <li v-for="item in events" :key="item.seq || item.kind + '-' + item.title">
+                <span class="timeline-icon" :class="eventTone(item.kind)" aria-hidden="true">
+                  <UiIcon :name="eventIcon(item.kind)" />
                 </span>
                 <div><strong>{{ item.title }}</strong><p>{{ item.detail }}</p><small>{{ formatTime(item.createdAt) }}</small></div>
               </li>
             </ol>
-            <div v-else class="timeline-empty" role="status">正在准备第一步…</div>
-          </section>
-
-          <article v-if="activeRun.report" class="report" aria-labelledby="report-title">
-            <div class="section-heading"><div><span>分析产物</span><h3 id="report-title">证据化报告</h3></div></div>
-            <div class="report-body">
-              <template v-for="(line, index) in reportLines">
-                <h4 v-if="line.type === 'heading'" :key="`h-${index}`">{{ line.text }}</h4>
-                <p v-else-if="line.type === 'paragraph'" :key="`p-${index}`">{{ line.text }}</p>
-                <p v-else :key="`b-${index}`" class="report-bullet"><span aria-hidden="true"></span>{{ line.text }}</p>
-              </template>
-            </div>
-          </article>
+          </details>
         </section>
 
-        <form class="task-composer" @submit.prevent="startAnalysis">
-          <label for="agent-question">分析任务</label>
-          <textarea
-            id="agent-question"
-            v-model.trim="question"
-            rows="3"
-            maxlength="500"
-            :disabled="starting || isRunning"
-            aria-describedby="agent-question-help agent-form-error"
-            placeholder="例如：比较 Abamectin 与 Chlorantraniliprole 的作用机制和关联作物，并核对外部化学记录。"
-          ></textarea>
+        <p v-if="activeRun && isRunning" class="task-loading current-run" role="status">
+          <span class="ui-skeleton" aria-hidden="true"></span> 正在分析，进度会自动更新。
+        </p>
+        <form v-else-if="!pendingKind && !runLoading && !runError" class="task-composer" @submit.prevent="startAnalysis">
+          <h2 v-if="!activeRun">你希望核验什么？</h2>
+          <label for="agent-question">{{ activeRun ? '继续分析当前任务' : '描述要分析的任务' }}</label>
+          <textarea id="agent-question" ref="question" class="ui-input" v-model.trim="question" rows="3"
+            required minlength="2" maxlength="500" :disabled="starting"
+            :aria-describedby="formError ? 'agent-question-help agent-start-error' : 'agent-question-help'"
+            placeholder="例如，比较两项登记的有效成分和关联作物。"></textarea>
           <div class="composer-row">
-            <small id="agent-question-help">Agent 只调用受控图谱与来源核验工具，分析过程会保留为可恢复任务。</small>
-            <button type="submit" :disabled="starting || isRunning || question.length < 2">
-              <span>{{ starting ? '正在创建…' : '开始分析' }}</span>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-5-7-2Z"/><path d="m12 14 7-9"/></svg>
+            <small id="agent-question-help">至少输入 2 个字。分析过程会保存在任务记录里。</small>
+            <button class="ui-button primary" type="submit" :disabled="starting">
+              {{ starting ? '正在启动…' : '开始分析' }} <UiIcon name="arrow" />
             </button>
           </div>
-          <p v-if="formError" id="agent-form-error" class="form-error" role="alert">{{ formError }}</p>
+          <p v-if="formError" id="agent-start-error" class="ui-error" role="alert">{{ formError }}</p>
         </form>
+
+        <section v-if="!activeRun && !runLoading && !runError" class="task-starter" aria-labelledby="agent-examples-title">
+          <h3 id="agent-examples-title">从一个示例开始</h3>
+          <ul>
+            <li v-for="item in starters" :key="item.title">
+              <button type="button" :disabled="starting" @click="useExample(item.question)">
+                <UiIcon :name="item.icon" />
+                <div><strong>{{ item.title }}</strong><span>{{ item.description }}</span></div>
+                <UiIcon name="arrow" />
+              </button>
+            </li>
+          </ul>
+        </section>
       </div>
 
-      <aside class="evidence-rail" aria-label="当前任务的证据">
-        <div class="section-heading"><div><span>证据集合</span><h2>来源与差异</h2></div><small>{{ evidence.length }} 条</small></div>
-        <div v-if="conflicts.length" class="conflict-summary">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg>
-          <div><strong>存在 {{ conflicts.length }} 组待核对差异</strong><span>报告会将冲突与确认结论分开呈现。</span></div>
+      <aside class="evidence-rail" aria-labelledby="agent-evidence-title">
+        <div class="rail-heading">
+          <div class="evidence-heading"><h2 id="agent-evidence-title">来源与差异</h2><span v-if="evidence.length">{{ evidence.length }} 条证据</span></div>
+          <button v-if="evidence.length" class="ui-button evidence-rail-toggle" type="button"
+            aria-controls="agent-evidence-content" :aria-expanded="String(evidenceRailOpen)"
+            @click="evidenceRailOpen = !evidenceRailOpen">
+            {{ evidenceRailOpen ? '收起' : '查看证据' }} <UiIcon name="chevron" />
+          </button>
         </div>
-        <div v-if="evidence.length" class="evidence-list">
-          <article v-for="item in visibleEvidence" :key="`${item.index}-${item.source}-${item.title}`">
-            <div><b>[{{ item.index }}]</b><span>{{ item.source }}</span><em v-if="item.jurisdiction">{{ item.jurisdiction }}</em></div>
-            <strong>{{ item.title }}</strong>
-            <p>{{ item.summary }}</p>
-            <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer">
-              查看来源
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 13v6H5V6h6"/></svg>
-            </a>
-          </article>
-          <button
-            v-if="evidence.length > 12"
-            type="button"
-            class="evidence-disclosure"
-            :aria-expanded="evidenceExpanded ? 'true' : 'false'"
-            @click="evidenceExpanded = !evidenceExpanded"
-          >{{ evidenceExpanded ? '收起证据' : `查看全部 ${evidence.length} 条证据` }}</button>
+        <div id="agent-evidence-content" v-if="evidence.length" class="evidence-content" :class="{ expanded: evidenceRailOpen }">
+          <div v-if="conflicts.length" class="conflict-summary">
+            <UiIcon name="alert" />
+            <p>有 {{ conflicts.length }} 组差异待核对。查看报告中的具体说明。</p>
+          </div>
+          <div class="evidence-list">
+            <ol id="agent-evidence-list">
+              <li v-for="(item, index) in visibleEvidence" :key="item.index + '-' + item.source + '-' + item.title"
+                :id="'agent-evidence-' + index" tabindex="-1" :class="{ highlighted: selectedEvidence === item }">
+                <div class="evidence-meta"><b>[{{ item.index }}]</b><span>{{ item.source }}</span><span v-if="item.jurisdiction">{{ item.jurisdiction }}</span></div>
+                <h3>{{ item.title }}</h3>
+                <p v-if="item.summary !== 'name=' + item.title">{{ item.summary }}</p>
+                <a v-if="isSourceLink(item.url)" class="ui-link" :href="item.url" target="_blank" rel="noopener noreferrer">
+                  查看来源 <UiIcon name="external" />
+                </a>
+              </li>
+            </ol>
+            <button v-if="evidence.length > 8" class="ui-button evidence-disclosure" type="button"
+              :aria-expanded="String(evidenceExpanded)" aria-controls="agent-evidence-list"
+              @click="evidenceExpanded = !evidenceExpanded">
+              {{ evidenceExpanded ? '收起其余证据' : '查看全部 ' + evidence.length + ' 条证据' }}
+            </button>
+          </div>
         </div>
-        <div v-else class="evidence-empty">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>
-          <strong>证据会显示在这里</strong>
-          <span>图谱实体、关系和外部来源核验完成后，会按编号汇总。</span>
+        <p v-else class="rail-state">{{ isRunning ? '正在检索证据，汇总后将在这里显示。' : '检索结束后，可在这里逐条查看图谱依据和外部来源。' }}</p>
+      </aside>
+
+      <aside class="thread-rail" aria-labelledby="agent-history-title">
+        <div class="rail-heading">
+          <h2 id="agent-history-title">最近任务</h2>
+          <button class="ui-button history-toggle" type="button" aria-controls="agent-thread-history"
+            :aria-expanded="String(historyExpanded)" @click="historyExpanded = !historyExpanded">
+            {{ historyExpanded ? '收起' : '查看记录' }} <UiIcon name="chevron" />
+          </button>
+        </div>
+        <div id="agent-thread-history" class="thread-history" :class="{ expanded: historyExpanded }">
+          <p v-if="threadsLoading" class="rail-state" role="status">正在载入任务…</p>
+          <div v-if="threadsError" class="rail-state">
+            <p role="alert">{{ threadsError }}</p>
+            <button type="button" class="ui-button" @click="loadThreads">刷新任务列表</button>
+          </div>
+          <ul v-if="threads.length" class="thread-list">
+            <li v-for="thread in threads" :key="thread.id">
+              <button type="button" class="thread-item" :class="{ active: thread.id === activeThreadId }"
+                :disabled="starting || resuming" :aria-current="thread.id === activeThreadId ? 'true' : undefined"
+                @click="openThread(thread)">
+                <strong>{{ thread.title }}</strong>
+                <small><span :class="statusTone(thread.latestStatus)">{{ runStatus(thread.latestStatus) }}</span> · {{ formatTime(thread.updatedAt) }}</small>
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="!threadsLoading && !threadsError" class="rail-state">开始分析后，可以在这里找回任务。</p>
         </div>
       </aside>
     </div>
@@ -185,16 +205,30 @@
 
 <script>
 import agentService, { eventStreamUrl } from '@/utils/agent';
+import UiIcon from '@/components/UiIcon.vue';
+import { citationParts } from '@/utils/citations';
+
+const STAGES = [
+  { key: 'plan', title: '规划任务' },
+  { key: 'tools', title: '检索核验' },
+  { key: 'verify', title: '检查差异' },
+  { key: 'report', title: '生成报告' }
+];
 
 export default {
   name: 'AgentView',
+  components: { UiIcon },
   data() {
     return {
       threads: [],
       threadsLoading: false,
       threadsError: '',
+      threadsVersion: 0,
       activeThreadId: '',
       activeRun: null,
+      runLoading: false,
+      runError: '',
+      runVersion: 0,
       events: [],
       question: '',
       clarification: '',
@@ -202,208 +236,306 @@ export default {
       starting: false,
       resuming: false,
       stream: null,
+      refreshTimer: null,
       historyExpanded: false,
       evidenceExpanded: false,
+      evidenceRailOpen: false,
+      selectedEvidence: null,
+
       starters: [
-        { title: '成分对比', description: '比较作用机制、关联对象与外部化学记录', question: "比较 'Abamectin' 与 'Chlorantraniliprole' 的作用机制和关联作物", icon: 'M4 7h6v6H4zM14 11h6v6h-6zM10 10l4 4' },
-        { title: '关系路径', description: '解释两个实体之间的多跳关联链', question: "查找 'Prothioconazole' 到 'Spring barley' 的关系路径", icon: 'M5 6h4v4H5zM15 14h4v4h-4zM9 8c5 0 1 8 6 8' },
-        { title: '登记初筛', description: '汇总图谱依据、外部来源和待确认差异', question: "核验 'Abamectin' 的登记与使用风险，并生成证据化初筛报告", icon: 'M12 3 4 7v5c0 4.5 3 7.4 8 9 5-1.6 8-4.5 8-9V7l-8-4Zm-3 9 2 2 4-4' }
-      ],
-      stages: [
-        { key: 'plan', title: '规划任务', caption: '识别目标与约束' },
-        { key: 'tools', title: '检索核验', caption: '调用受控工具' },
-        { key: 'verify', title: '检查差异', caption: '汇总编号证据' },
-        { key: 'report', title: '生成报告', caption: '保留结论边界' }
+        { title: '成分对比', description: '比较作用机制与关联作物', question: "比较 'Abamectin' 与 'Chlorantraniliprole' 的作用机制和关联作物", icon: 'task' },
+        { title: '关系路径', description: '解释两个实体如何相连', question: "查找 'Prothioconazole' 到 'Spring barley' 的关系路径", icon: 'graph' },
+        { title: '登记初筛', description: '核验登记依据与外部来源', question: "核验 'Abamectin' 的登记与使用风险，并生成证据化初筛报告", icon: 'document' }
       ]
     };
   },
   computed: {
     isRunning() {
-      return this.activeRun && this.activeRun.status === 'running';
+      return this.activeRun?.status === 'running';
+    },
+    pendingKind() {
+      const status = this.activeRun?.status;
+      return ({ waiting_clarification: 'clarification', waiting_approval: 'approval', paused: 'paused' })[status];
+    },
+    decisionTitle() {
+      const titles = { clarification: '还需要补充信息', approval: '确认是否生成报告', paused: '从上次进度继续' };
+      return this.activeRun?.interrupt?.title || titles[this.pendingKind];
+    },
+    stages() {
+      const lastPlan = [...this.events].reverse().find(item => item.kind === 'plan_ready');
+      const stepIds = lastPlan?.payload?.plan?.steps?.map(step => step.id) || [];
+      const finishedSteps = new Set(this.events
+        .filter(item => ['tool_completed', 'tool_failed'].includes(item.kind))
+        .map(item => item.payload?.stepId));
+      const verified = Boolean(this.evidenceEvent);
+      const completed = [
+        Boolean(lastPlan),
+        verified || (stepIds.length > 0 && stepIds.every(id => finishedSteps.has(id))),
+        verified,
+        Boolean(this.activeRun?.report) && this.activeRun?.status === 'completed'
+      ];
+      const firstPending = completed.indexOf(false);
+      return STAGES.map((stage, index) => ({
+        ...stage,
+        state: completed[index] ? 'done' : (this.isRunning && firstPending === index ? 'current' : 'pending')
+      }));
+    },
+    lastClarification() {
+      return [...this.events].reverse().find(item => item.kind === 'clarification_received');
     },
     evidenceEvent() {
       return [...this.events].reverse().find(item => item.kind === 'evidence_verified');
     },
     evidence() {
-      return this.evidenceEvent && this.evidenceEvent.payload && Array.isArray(this.evidenceEvent.payload.evidence)
-        ? this.evidenceEvent.payload.evidence
-        : [];
+      const items = this.evidenceEvent?.payload?.evidence;
+      return Array.isArray(items) ? items : [];
     },
     conflicts() {
-      return this.evidenceEvent && this.evidenceEvent.payload && Array.isArray(this.evidenceEvent.payload.conflicts)
-        ? this.evidenceEvent.payload.conflicts
-        : [];
+      const items = this.evidenceEvent?.payload?.conflicts;
+      return Array.isArray(items) ? items : [];
     },
     visibleEvidence() {
-      return this.evidenceExpanded ? this.evidence : this.evidence.slice(0, 12);
+      return this.evidenceExpanded ? this.evidence : this.evidence.slice(0, 8);
     },
-    reportLines() {
-      return String((this.activeRun && this.activeRun.report) || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean).map(value => {
-        if (/^#{1,4}\s/.test(value)) return { type: 'heading', text: value.replace(/^#{1,4}\s+/, '') };
-        if (/^-\s/.test(value)) return { type: 'bullet', text: value.replace(/^-\s+/, '') };
-        return { type: 'paragraph', text: value };
-      });
+    reportBlocks() {
+      const lines = String(this.activeRun?.report || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      return lines.reduce((blocks, line) => {
+        const list = /^[-*]\s+/.test(line);
+        const heading = /^#{1,6}\s+/.test(line);
+        const row = {
+          tag: list ? 'li' : heading ? 'h4' : 'p',
+          parts: citationParts(line.replace(/^(?:[-*]|#{1,6})\s+/, ''), this.evidence)
+        };
+        const previous = blocks[blocks.length - 1];
+        if (list && previous?.list) previous.rows.push(row);
+        else blocks.push({ list, rows: [row] });
+        return blocks;
+      }, []);
     }
   },
-  async mounted() {
-    await this.loadThreads();
+  mounted() {
+    document.title = '任务分析 · AgriReg AI';
+    this.loadThreads();
   },
   beforeDestroy() {
+    this.runVersion += 1;
+    this.threadsVersion += 1;
     this.closeStream();
   },
   methods: {
     async loadThreads() {
+      const version = ++this.threadsVersion;
       this.threadsLoading = true;
       this.threadsError = '';
       try {
-        const response = await agentService.get('/api/agent/threads');
+        const response = await agentService.get('/api/agent/threads', { timeout: 8000 });
+        if (version !== this.threadsVersion) return;
         this.threads = Array.isArray(response.data) ? response.data : [];
       } catch (error) {
-        this.threadsError = '最近任务暂时无法载入。启动任务分析服务后可以继续。';
+        if (version !== this.threadsVersion) return;
+        this.threadsError = '任务记录暂时无法载入。';
+        this.historyExpanded = true;
       } finally {
-        this.threadsLoading = false;
+        if (version === this.threadsVersion) this.threadsLoading = false;
       }
     },
-    newTask() {
+    resetTask() {
+      this.runVersion += 1;
       this.closeStream();
       this.activeThreadId = '';
       this.activeRun = null;
       this.events = [];
       this.question = '';
+      this.clarification = '';
       this.formError = '';
+      this.runError = '';
+      this.runLoading = false;
+      this.evidenceRailOpen = false;
       this.evidenceExpanded = false;
-      this.$nextTick(() => document.getElementById('agent-question')?.focus());
+      this.selectedEvidence = null;
+    },
+    newTask() {
+      this.resetTask();
+      this.$nextTick(() => this.$refs.question?.focus());
+    },
+    useExample(question) {
+      this.question = question;
+      this.formError = '';
+      this.$nextTick(() => this.$refs.question?.focus());
     },
     async openThread(thread) {
-      if (!thread || !thread.id) return;
-      this.closeStream();
+      if (!thread?.id || this.starting || this.resuming) return;
+      this.resetTask();
+      const version = this.runVersion;
       this.activeThreadId = thread.id;
-      this.evidenceExpanded = false;
+      this.runLoading = true;
       try {
-        const response = await agentService.get(`/api/agent/threads/${encodeURIComponent(thread.id)}`);
-        const runs = response.data && Array.isArray(response.data.runs) ? response.data.runs : [];
-        if (!runs.length) {
-          this.activeRun = null;
-          this.events = [];
-          return;
-        }
-        await this.loadRun(thread.id, runs[0].id);
+        const response = await agentService.get('/api/agent/threads/' + encodeURIComponent(thread.id));
+        if (version !== this.runVersion) return;
+        const recentRun = response.data?.runs?.[0];
+        if (recentRun) await this.refreshRun(thread.id, recentRun.id);
+        if (version !== this.runVersion) return;
+        if (!this.runError) this.historyExpanded = false;
       } catch (error) {
-        this.formError = '这条任务记录暂时无法打开。';
+        if (version === this.runVersion) this.runError = '这条任务记录暂时无法打开。';
+      } finally {
+        if (version === this.runVersion) {
+          this.runLoading = false;
+          if (this.activeRun) this.$nextTick(() => this.$refs.runHeading?.focus());
+        }
       }
     },
-    async loadRun(threadId, runId) {
-      const response = await agentService.get(`/api/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}`);
-      this.activeRun = response.data;
-      this.events = response.data.events || [];
-      if (response.data.status === 'running') this.connectStream(threadId, runId);
-    },
     async startAnalysis() {
-      if (this.starting || this.isRunning || this.question.length < 2) return;
+      if (this.starting || this.isRunning || this.pendingKind || this.question.length < 2) return;
+      const version = this.runVersion;
       this.starting = true;
       this.formError = '';
       try {
         let threadId = this.activeThreadId;
         if (!threadId) {
-          const threadResponse = await agentService.post('/api/agent/threads', { title: '新分析任务' });
-          threadId = threadResponse.data.id;
+          const response = await agentService.post('/api/agent/threads', { title: '新分析任务' });
+          if (version !== this.runVersion) return;
+          threadId = response.data.id;
           this.activeThreadId = threadId;
         }
-        const response = await agentService.post(`/api/agent/threads/${encodeURIComponent(threadId)}/runs`, { question: this.question });
-        this.activeRun = response.data;
-        this.events = response.data.events || [];
+        const response = await agentService.post(this.runUrl(threadId), { question: this.question });
+        if (version !== this.runVersion) return;
+        this.evidenceRailOpen = false;
+        this.evidenceExpanded = false;
+        this.selectedEvidence = null;
+        this.applyRun(response.data);
         this.question = '';
-        await this.loadThreads();
         this.connectStream(threadId, response.data.id);
+        this.loadThreads();
+        this.$nextTick(() => this.$refs.runHeading?.focus());
       } catch (error) {
-        this.formError = '任务没有启动成功。请确认任务分析服务已启动，然后重试。';
+        if (version === this.runVersion) this.formError = '任务没有启动成功。请确认任务分析服务可用后重试。';
       } finally {
-        this.starting = false;
+        if (version === this.runVersion) this.starting = false;
       }
     },
-    connectStream(threadId, runId) {
+    runUrl(threadId, runId) {
+      const runs = '/api/agent/threads/' + encodeURIComponent(threadId) + '/runs';
+      return runId ? runs + '/' + encodeURIComponent(runId) : runs;
+    },
+    applyRun(run) {
+      this.activeRun = run;
+      if (Array.isArray(run.events)) this.events = run.events;
+    },
+    connectStream(threadId, runId, retry = true) {
       this.closeStream();
-      const last = this.events.length ? Number(this.events[this.events.length - 1].seq || 0) : 0;
-      this.stream = new EventSource(eventStreamUrl(threadId, runId, last));
-      this.stream.addEventListener('agent_event', event => {
+      const after = Number(this.events[this.events.length - 1]?.seq || 0);
+      const stream = new EventSource(eventStreamUrl(threadId, runId, after));
+      this.stream = stream;
+      stream.addEventListener('agent_event', event => {
+        if (this.stream !== stream) return;
         const item = JSON.parse(event.data);
         if (!this.events.some(existing => Number(existing.seq) === Number(item.seq))) this.events.push(item);
       });
-      this.stream.addEventListener('run_snapshot', event => {
-        this.activeRun = JSON.parse(event.data);
+      stream.addEventListener('run_snapshot', event => {
+        if (this.stream !== stream) return;
+        this.applyRun(JSON.parse(event.data));
         this.closeStream();
         this.loadThreads();
       });
-      this.stream.onerror = () => {
+      stream.onerror = () => {
+        if (this.stream !== stream) return;
         this.closeStream();
-        window.setTimeout(() => this.refreshRun(threadId, runId), 800);
+        if (retry) {
+          this.refreshTimer = window.setTimeout(() => this.refreshRun(threadId, runId, false), 800);
+        } else {
+          this.runError = '任务进度连接中断。可以手动刷新状态。';
+        }
       };
     },
-    async refreshRun(threadId, runId) {
+    async refreshRun(threadId, runId, retry = true) {
+      const version = this.runVersion;
+      this.closeStream();
       try {
-        await this.loadRun(threadId, runId);
+        const response = await agentService.get(this.runUrl(threadId, runId));
+        if (version !== this.runVersion) return;
+        this.applyRun(response.data);
+        this.runError = '';
+        if (this.isRunning) this.connectStream(threadId, runId, retry);
+        else this.loadThreads();
       } catch (error) {
-        this.formError = '任务进度暂时无法刷新，可以稍后重新打开这条任务。';
+        if (version === this.runVersion) this.runError = '任务进度暂时无法载入，请重试。';
       }
     },
     closeStream() {
+      if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
       if (this.stream) this.stream.close();
       this.stream = null;
     },
+    submitClarification() {
+      if (this.clarification.length < 2) {
+        this.formError = '请输入至少 2 个字。';
+        return;
+      }
+      this.resume(this.clarification);
+    },
     async resume(value) {
-      if (!this.activeRun || this.resuming) return;
+      if (!this.pendingKind || this.resuming) return;
+      const version = this.runVersion;
+      const { threadId, id } = this.activeRun;
       this.resuming = true;
       this.formError = '';
       try {
-        const threadId = this.activeRun.threadId;
-        const runId = this.activeRun.id;
-        const response = await agentService.post(`/api/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/resume`, { value });
-        this.activeRun = response.data;
+        const response = await agentService.post(this.runUrl(threadId, id) + '/resume', { value });
+        if (version !== this.runVersion) return;
+        this.applyRun(response.data);
         this.clarification = '';
-        this.connectStream(threadId, runId);
+        this.runError = '';
+        if (this.isRunning) this.connectStream(threadId, id);
+        else this.loadThreads();
+        this.$nextTick(() => {
+          if (this.pendingKind === 'clarification') this.$refs.clarification?.focus();
+          else this.$refs.runHeading?.focus({ preventScroll: true });
+        });
       } catch (error) {
-        this.formError = '这次确认没有提交成功，请重试。';
+        if (version !== this.runVersion) return;
+        if (error.response?.status === 409) {
+          await this.refreshRun(threadId, id);
+          if (version !== this.runVersion || !this.pendingKind) return;
+        }
+        this.formError = '这次操作没有提交成功，请重试。';
       } finally {
-        this.resuming = false;
+        if (version === this.runVersion) this.resuming = false;
       }
     },
-    stageState(key) {
-      const completed = {
-        plan: this.events.some(item => item.kind === 'plan_ready'),
-        tools: this.events.some(item => ['tool_completed', 'tool_failed'].includes(item.kind)),
-        verify: this.events.some(item => item.kind === 'evidence_verified'),
-        report: Boolean(this.activeRun && this.activeRun.report)
-      };
-      if (completed[key]) return 'done';
-      const order = ['plan', 'tools', 'verify', 'report'];
-      const firstPending = order.find(item => !completed[item]);
-      return firstPending === key && this.activeRun && this.activeRun.status === 'running' ? 'current' : '';
+    focusEvidence(item) {
+      const index = this.evidence.indexOf(item);
+      if (index < 0) return;
+      this.evidenceRailOpen = true;
+      if (index >= 8) this.evidenceExpanded = true;
+      this.selectedEvidence = item;
+      this.$nextTick(() => document.getElementById('agent-evidence-' + index)?.focus());
+    },
+    isSourceLink(url) {
+      return typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(url);
     },
     runStatus(status) {
-      return ({ running: '分析中', waiting_clarification: '等待补充', waiting_approval: '等待确认', completed: '已完成', rejected: '已停止', failed: '未完成', paused: '可继续' })[status] || '准备中';
-    },
-    threadStatus(status) {
-      return this.runStatus(status || '');
+      return ({
+        running: '分析中', waiting_clarification: '等待补充', waiting_approval: '待审批',
+        completed: '已完成', rejected: '已拒绝', failed: '分析失败', paused: '已暂停'
+      })[status] || '待开始';
     },
     statusTone(status) {
-      if (status === 'completed') return 'success';
+      if (status === 'completed' || status === 'running') return 'success';
       if (status === 'failed' || status === 'rejected') return 'danger';
-      if (String(status).startsWith('waiting_')) return 'warning';
-      return 'working';
+      if (String(status).startsWith('waiting_') || status === 'paused') return 'warning';
+      return '';
     },
     eventTone(kind) {
       if (kind === 'tool_failed' || kind === 'run_failed') return 'danger';
-      if (kind === 'evidence_verified' || kind === 'report_ready') return 'success';
       if (kind === 'input_required') return 'warning';
-      return 'primary';
+      return 'success';
     },
     eventIcon(kind) {
-      if (kind === 'plan_ready') return 'M5 6h14M5 12h9M5 18h11';
-      if (kind === 'evidence_verified') return 'm5 12 4 4L19 6';
-      if (kind === 'report_ready') return 'M5 3h10l4 4v14H5zM14 3v5h5M8 13h8M8 17h6';
-      if (kind === 'input_required') return 'M12 3 2.8 19h18.4L12 3ZM12 9v4m0 3h.01';
-      if (kind === 'tool_failed' || kind === 'run_failed') return 'M6 6l12 12M18 6 6 18';
-      return 'M4 12h5l2-4 3 8 2-4h4';
+      if (kind === 'evidence_verified') return 'check';
+      if (kind === 'input_required' || kind === 'tool_failed' || kind === 'run_failed') return 'alert';
+      return 'document';
     },
     formatTime(value) {
       if (!value) return '刚刚';
@@ -416,209 +548,151 @@ export default {
 </script>
 
 <style scoped>
-.agent-page {
-  --primary: #2563eb; --primary-dark: #1d4ed8; --accent: #c2410c; --ink: #1e293b;
-  --muted-ink: #475569; --surface: #fff; --soft: #f8fafc; --muted: #e9eff8;
-  --border: #dbe4f0; --danger: #b42318; --warning: #9a3412; --success: #166534;
-  min-height: calc(100vh - 118px); color: var(--ink); font-family: "Work Sans", Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-.agent-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1480px; margin: 0 auto 18px; padding: 8px 2px 0; }
-.agent-hero p, .eyebrow, .section-heading span, .rail-heading span { margin: 0 0 6px; color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
-.agent-hero h1 { margin: 0; font-family: Outfit, "PingFang SC", sans-serif; font-size: clamp(26px, 3vw, 40px); line-height: 1.15; letter-spacing: -.025em; }
-.agent-hero > div > span { display: block; max-width: 720px; margin-top: 10px; color: var(--muted-ink); font-size: 14px; line-height: 1.65; }
-.quick-link { display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--primary-dark); font-size: 13px; font-weight: 750; box-shadow: 0 1px 2px rgba(15,23,42,.05); transition: border-color 180ms ease, background 180ms ease; }
-.quick-link:hover { border-color: #93b4ed; background: #f7faff; }
-.quick-link svg, button svg, a svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.agent-grid { display: grid; grid-template-columns: minmax(190px, .72fr) minmax(520px, 2.2fr) minmax(250px, 1fr); gap: 14px; max-width: 1480px; margin: 0 auto; align-items: start; }
-.thread-rail, .task-column, .evidence-rail { min-width: 0; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); box-shadow: 0 4px 16px rgba(30,41,59,.055); }
-.thread-rail, .evidence-rail { position: sticky; top: 86px; max-height: calc(100vh - 110px); overflow: auto; padding: 14px; }
-.rail-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.rail-heading strong, .section-heading h2, .section-heading h3 { display: block; margin: 0; font-size: 17px; line-height: 1.25; }
-.rail-heading button { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); color: var(--primary); cursor: pointer; transition: background 180ms ease, border-color 180ms ease; }
-.rail-heading button:hover { border-color: #93b4ed; background: #eef5ff; }
-.thread-list { display: grid; min-width: 0; gap: 6px; margin-top: 14px; }
-.history-disclosure { display: none; width: 100%; min-height: 44px; margin-top: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--soft); color: var(--primary-dark); font-size: 12px; font-weight: 750; cursor: pointer; }
-.thread-item { width: 100%; min-width: 0; min-height: 62px; padding: 10px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; transition: background 180ms ease, border-color 180ms ease; }
-.thread-item:hover { background: var(--soft); }
-.thread-item.active { border-color: #b8cef2; background: #eef5ff; }
-.thread-item span, .thread-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-item span { font-size: 13px; font-weight: 700; }
-.thread-item small { margin-top: 5px; color: var(--muted-ink); font-size: 11px; }
-.rail-state, .rail-empty, .evidence-empty { color: var(--muted-ink); font-size: 12px; line-height: 1.55; }
-.rail-state { margin: 18px 2px; }
-.rail-state.error, .form-error { color: var(--danger); }
-.rail-empty, .evidence-empty { display: grid; justify-items: start; gap: 7px; padding: 28px 5px; }
-.rail-empty svg, .evidence-empty svg { width: 28px; fill: none; stroke: #7890af; stroke-width: 1.5; }
-.rail-empty strong, .evidence-empty strong { color: var(--ink); font-size: 13px; }
-.task-column { padding: clamp(16px, 2vw, 26px); }
-.task-starter { padding: clamp(10px, 2vw, 28px) 4px clamp(20px, 3vw, 42px); }
-.task-starter h2 { margin: 0; font-family: Outfit, "PingFang SC", sans-serif; font-size: clamp(24px, 3vw, 34px); }
-.task-starter > p { max-width: 660px; margin: 10px 0 22px; color: var(--muted-ink); font-size: 14px; line-height: 1.65; }
-.starter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.starter-grid button { min-height: 142px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--soft); color: var(--ink); text-align: left; cursor: pointer; transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }
-.starter-grid button:hover { border-color: #93b4ed; background: #f7faff; box-shadow: 0 5px 14px rgba(37,99,235,.08); }
-.starter-grid svg { color: var(--primary); }
-.starter-grid strong, .starter-grid span { display: block; }
-.starter-grid strong { margin-top: 17px; font-size: 14px; }
-.starter-grid span { margin-top: 7px; color: var(--muted-ink); font-size: 12px; line-height: 1.5; }
-.run-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.run-heading h2 { max-width: 760px; margin: 0; font-size: clamp(19px, 2.2vw, 27px); line-height: 1.35; overflow-wrap: anywhere; }
-.run-status { display: inline-flex; min-height: 32px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 750; }
-.run-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.run-status.working { background: #eaf2ff; color: #1d4ed8; }
-.run-status.success { background: #e9f8ee; color: var(--success); }
-.run-status.warning { background: #fff1e8; color: var(--warning); }
-.run-status.danger { background: #fff0ef; color: var(--danger); }
-.progress-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 22px 0; padding: 0; list-style: none; }
-.progress-steps li { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--soft); }
-.progress-steps li > span { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border: 1px solid #b7c5d8; border-radius: 50%; color: #64748b; font-size: 11px; font-weight: 800; }
-.progress-steps strong, .progress-steps small { display: block; }
-.progress-steps strong { font-size: 12px; }
-.progress-steps small { margin-top: 3px; color: var(--muted-ink); font-size: 10px; }
-.progress-steps li.done { border-color: #b6d9c0; background: #f1faf4; }
-.progress-steps li.done > span { border-color: var(--success); background: var(--success); color: #fff; }
-.progress-steps li.current { border-color: #91b4ee; background: #eef5ff; box-shadow: inset 0 0 0 1px #d3e2fa; }
-.progress-steps li.current > span { border-color: var(--primary); color: var(--primary); }
-.decision-card { display: grid; grid-template-columns: 42px 1fr; gap: 13px; margin: 18px 0; padding: 16px; border: 1px solid #f3c7a8; border-radius: 12px; background: #fff9f5; }
-.decision-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: #ffeadb; color: var(--warning); }
-.decision-card > div > span { color: var(--warning); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
-.decision-card h3 { margin: 3px 0 5px; font-size: 16px; }
-.decision-card p { margin: 0; color: var(--muted-ink); font-size: 13px; line-height: 1.6; }
-.decision-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
-.decision-actions button, .clarification-form button { min-height: 44px; padding: 0 15px; border-radius: 9px; font-size: 13px; font-weight: 750; cursor: pointer; }
-.decision-actions .approve, .clarification-form button { border: 1px solid var(--primary); background: var(--primary); color: #fff; }
-.decision-actions .reject { border: 1px solid #e2aaa5; background: #fff; color: var(--danger); }
-.decision-actions button:disabled, .clarification-form button:disabled { cursor: not-allowed; opacity: .48; }
-.clarification-form { display: grid; grid-template-columns: 1fr auto; gap: 7px 9px; margin-top: 13px; }
-.clarification-form label { grid-column: 1 / -1; font-size: 12px; font-weight: 750; }
-.clarification-form input { min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid #c8d4e3; border-radius: 9px; background: #fff; color: var(--ink); font-size: 16px; }
-.clarification-form small { grid-column: 1 / -1; color: var(--muted-ink); font-size: 11px; }
-.timeline { margin-top: 22px; }
-.section-heading small { color: var(--muted-ink); font-size: 11px; }
-.timeline ol { display: grid; gap: 0; margin: 13px 0 0; padding: 0; list-style: none; }
-.timeline li { position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding-bottom: 15px; }
-.timeline li:not(:last-child)::after { position: absolute; top: 30px; bottom: 0; left: 16px; width: 1px; background: var(--border); content: ''; }
-.timeline-icon { z-index: 1; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #c6d5e8; border-radius: 10px; background: #f2f6fb; color: var(--primary); }
-.timeline-icon svg { width: 17px; }
-.timeline-icon.success { border-color: #b6d9c0; background: #effaf2; color: var(--success); }
-.timeline-icon.warning { border-color: #f3c7a8; background: #fff4eb; color: var(--warning); }
-.timeline-icon.danger { border-color: #e6b5b0; background: #fff2f1; color: var(--danger); }
-.timeline li strong { display: block; font-size: 13px; }
-.timeline li p { max-width: 72ch; margin: 4px 0; color: var(--muted-ink); font-size: 12px; line-height: 1.55; }
-.timeline li small { color: #718096; font-size: 10px; }
-.timeline-empty { margin-top: 12px; padding: 14px; border-radius: 10px; background: var(--soft); color: var(--muted-ink); font-size: 12px; }
-.report { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
-.report-body { max-width: 74ch; margin-top: 14px; }
-.report-body h4 { margin: 19px 0 7px; font-size: 16px; }
-.report-body h4:first-child { margin-top: 0; font-size: 20px; }
-.report-body p { margin: 6px 0; color: #334155; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
-.report-bullet { position: relative; padding-left: 16px; }
-.report-bullet > span { position: absolute; top: .78em; left: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--primary); }
-.task-composer { margin-top: 22px; padding-top: 19px; border-top: 1px solid var(--border); }
-.task-composer > label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 780; }
-.task-composer textarea { display: block; width: 100%; min-height: 92px; resize: vertical; padding: 12px 13px; border: 1px solid #c8d4e3; border-radius: 11px; background: #fbfdff; color: var(--ink); font-family: inherit; font-size: 16px; line-height: 1.55; transition: border-color 180ms ease, box-shadow 180ms ease; }
-.task-composer textarea:focus, .clarification-form input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-.task-composer textarea:disabled { cursor: not-allowed; opacity: .58; }
-.composer-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 9px; }
-.composer-row small { max-width: 620px; color: var(--muted-ink); font-size: 11px; line-height: 1.5; }
-.composer-row button { display: inline-flex; min-width: 120px; min-height: 44px; align-items: center; justify-content: center; gap: 7px; padding: 0 15px; border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 780; cursor: pointer; transition: background 180ms ease, border-color 180ms ease; }
-.composer-row button:hover:not(:disabled) { border-color: #9a3412; background: #9a3412; }
-.composer-row button:disabled { cursor: not-allowed; opacity: .46; }
-.form-error { margin: 8px 0 0; font-size: 12px; }
-.evidence-rail .section-heading { padding-bottom: 11px; border-bottom: 1px solid var(--border); }
-.conflict-summary { display: grid; grid-template-columns: 28px 1fr; gap: 8px; margin: 12px 0; padding: 10px; border: 1px solid #f3c7a8; border-radius: 10px; background: #fff7f0; color: var(--warning); }
-.conflict-summary svg { width: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.conflict-summary strong, .conflict-summary span { display: block; }
-.conflict-summary strong { font-size: 12px; }
-.conflict-summary span { margin-top: 3px; color: #7c4a31; font-size: 10px; line-height: 1.45; }
-.evidence-list { display: grid; gap: 9px; margin-top: 12px; }
-.evidence-list article { padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); }
-.evidence-list article > div { display: flex; min-width: 0; align-items: center; gap: 6px; }
-.evidence-list b { color: var(--primary); font-size: 11px; }
-.evidence-list div span, .evidence-list em { overflow: hidden; color: var(--muted-ink); font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
-.evidence-list em { margin-left: auto; padding: 2px 5px; border-radius: 999px; background: var(--muted); }
-.evidence-list article > strong { display: block; margin-top: 7px; font-size: 12px; overflow-wrap: anywhere; }
-.evidence-list p { display: -webkit-box; overflow: hidden; margin: 5px 0 0; color: var(--muted-ink); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.evidence-list a { display: inline-flex; min-height: 32px; align-items: center; gap: 4px; margin-top: 6px; color: var(--primary-dark); font-size: 11px; font-weight: 750; }
-.evidence-list a svg { width: 14px; }
-.evidence-disclosure { min-height: 44px; border: 1px solid #b8cef2; border-radius: 9px; background: #eef5ff; color: var(--primary-dark); font-size: 12px; font-weight: 750; cursor: pointer; }
-button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid rgba(37,99,235,.32); outline-offset: 2px; }
+.view-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.agent-grid { display: grid; grid-template-columns: minmax(172px, 205px) minmax(0, 1fr) minmax(238px, 288px); align-items: start; gap: 14px; }
+.task-column, .thread-rail, .evidence-rail { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.task-column { grid-area: 1 / 2; }
+.evidence-rail { grid-area: 1 / 3; }
+.thread-rail { grid-area: 1 / 1; }
+.rail-heading { display: flex; min-height: 54px; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 5px 7px; padding: 9px 13px; border-bottom: 1px solid var(--line); }
+.rail-heading h2 { font-size: 16px; }
+.rail-heading span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.history-toggle, .evidence-rail-toggle { display: none; }
+.evidence-heading { display: flex; flex: 1; align-items: baseline; justify-content: space-between; gap: 6px; }
+.rail-state { display: grid; justify-items: start; gap: 6px; padding: 13px; color: var(--muted); font-size: 13px; }
+.rail-state [role="alert"] { color: var(--danger); }
+.thread-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; max-height: 65vh; margin: 0; padding: 7px; list-style: none; overflow-y: auto; }
+.thread-item { width: 100%; min-height: 48px; padding: 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; }
+.thread-item:not(:disabled):hover, .thread-item.active { border-color: var(--line); background: var(--wash); }
+.thread-item strong, .thread-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-item strong { font-size: 13px; }
+.thread-item small { color: var(--muted); font-size: 12px; }
 
-/* Match the landing, graph and GraphRAG workspaces. */
-.agent-page {
-  --primary: #a4ffcb; --primary-dark: #a4ffcb; --accent: #ffd36c; --ink: #edf7f1;
-  --muted-ink: #91a79c; --surface: #0c1914; --soft: #10231b; --muted: #152a21;
-  --border: rgba(181,231,203,.14); --danger: #ff9b8d; --warning: #ffb27b; --success: #75dda0;
+.task-composer, .task-starter, .run-card { padding: 19px 21px; }
+.task-composer { display: grid; gap: 7px; }
+.run-card + .task-composer { border-top: 1px solid var(--line); }
+.task-composer h2 { margin-bottom: 7px; font-size: 1.4rem; }
+.task-composer label, .clarification-form label { width: fit-content; font-size: 14px; font-weight: 700; }
+.task-composer textarea { min-height: 101px; }
+.composer-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.composer-row .ui-button { margin-left: auto; }
+.composer-row small, .clarification-form small { color: var(--muted); font-size: 12px; }
+.task-starter { padding-top: 0; }
+.task-starter h3 { padding-top: 15px; border-top: 1px solid var(--line); font-size: 15px; }
+.task-starter ul, .evidence-list ol { margin: 0; padding: 0; list-style: none; }
+.task-starter button {
+  display: grid;
+  width: 100%;
+  min-height: 60px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
 }
-.agent-hero p,
-.eyebrow,
-.section-heading span,
-.rail-heading span { color: #a4ffcb; }
-.agent-hero h1 { color: #edf7f1; }
-.agent-hero > div > span { color: #91a79c; }
-.quick-link { border-color: var(--border); background: #10231b; color: #a4ffcb; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
-.quick-link:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); }
-.thread-rail,
-.task-column,
-.evidence-rail { border-color: var(--border); background: #0c1914; box-shadow: 0 18px 50px rgba(0,0,0,.18); }
-.rail-heading button { border-color: var(--border); background: #10231b; color: #a4ffcb; }
-.rail-heading button:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); }
-.thread-item.active { border-color: rgba(164,255,203,.28); background: rgba(164,255,203,.09); }
-.starter-grid button { border-color: var(--border); background: #10231b; }
-.starter-grid button:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.07); box-shadow: 0 8px 24px rgba(0,0,0,.12); }
-.progress-steps li { border-color: var(--border); background: #10231b; }
-.progress-steps li > span { border-color: #537364; color: #91a79c; }
-.progress-steps li.done { border-color: rgba(117,221,160,.28); background: rgba(117,221,160,.08); }
-.progress-steps li.current { border-color: rgba(164,255,203,.34); background: rgba(164,255,203,.09); box-shadow: inset 0 0 0 1px rgba(164,255,203,.07); }
-.run-status.working { background: rgba(123,229,255,.1); color: #7be5ff; }
-.run-status.success { background: rgba(117,221,160,.1); }
-.run-status.warning { background: rgba(255,178,123,.1); }
-.run-status.danger { background: rgba(255,155,141,.1); }
-.decision-card,
-.conflict-summary { border-color: rgba(255,178,123,.24); background: rgba(255,178,123,.075); }
-.decision-icon { background: rgba(255,178,123,.12); }
-.decision-actions .approve,
-.clarification-form button { border-color: #a4ffcb; background: #a4ffcb; color: #07110e; }
-.decision-actions .reject { border-color: rgba(255,155,141,.28); background: transparent; color: #ff9b8d; }
-.clarification-form input,
-.task-composer textarea { border-color: var(--border); background: #10231b; color: #edf7f1; }
-.task-composer textarea::placeholder,
-.clarification-form input::placeholder { color: #61776c; }
-.task-composer textarea:focus,
-.clarification-form input:focus { border-color: #a4ffcb; box-shadow: 0 0 0 3px rgba(164,255,203,.1); }
-.timeline-icon { border-color: var(--border); background: #10231b; color: #a4ffcb; }
-.timeline-icon.success { border-color: rgba(117,221,160,.28); background: rgba(117,221,160,.08); }
-.timeline-icon.warning { border-color: rgba(255,178,123,.24); background: rgba(255,178,123,.08); }
-.timeline-icon.danger { border-color: rgba(255,155,141,.24); background: rgba(255,155,141,.08); }
-.report-body p { color: #c2d3c9; }
-.composer-row button { border-color: #a4ffcb; background: #a4ffcb; color: #07110e; }
-.composer-row button:hover:not(:disabled) { border-color: #d3ffe5; background: #d3ffe5; }
-.conflict-summary span { color: #d9b596; }
-.evidence-list article { border-color: var(--border); background: #10231b; }
-.evidence-disclosure { border-color: rgba(164,255,203,.22); background: rgba(164,255,203,.08); color: #a4ffcb; }
-button:focus-visible,
-a:focus-visible,
-textarea:focus-visible,
-input:focus-visible { outline-color: rgba(164,255,203,.5); }
-@media (max-width: 1179px) { .agent-grid { grid-template-columns: 210px minmax(0, 1fr); } .evidence-rail { position: static; grid-column: 1 / -1; max-height: none; } .evidence-list { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 899px) { .agent-hero { align-items: flex-start; } .agent-grid { grid-template-columns: 1fr; } .thread-rail, .evidence-rail { position: static; max-height: none; } .thread-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .starter-grid, .evidence-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) {
-  .agent-page { min-height: calc(100dvh - 82px); }
-  .agent-hero { display: block; padding: 4px 4px 0; }
-  .agent-hero h1 { font-size: 27px; }
-  .quick-link { margin-top: 13px; }
-  .agent-grid { gap: 10px; }
-  .thread-rail, .task-column, .evidence-rail { border-radius: 12px; }
-  .thread-list, .starter-grid, .evidence-list { grid-template-columns: 1fr; }
-  .thread-list:not(.expanded) .thread-item:nth-child(n + 3) { display: none; }
-  .history-disclosure { display: block; }
-  .progress-steps { grid-template-columns: repeat(2, 1fr); }
-  .run-heading { display: block; }
-  .run-status { margin-top: 10px; }
-  .composer-row { align-items: stretch; flex-direction: column; }
-  .composer-row button { width: 100%; }
-  .clarification-form { grid-template-columns: 1fr; }
-  .clarification-form label, .clarification-form small { grid-column: auto; }
+.task-starter li:last-child button { border-bottom: 0; }
+.task-starter button:hover:not(:disabled) { background: var(--wash); }
+.task-starter button strong, .task-starter button span { display: block; }
+.task-starter button strong { color: var(--ink); font-size: 14px; }
+.task-starter button span { color: var(--muted); font-size: 13px; }
+.task-loading { display: grid; gap: 8px; padding: 18px 21px; color: var(--muted); font-size: 14px; }
+.current-run { border-top: 1px solid var(--line); }
+.run-error { margin: 13px; }
+.run-error .ui-button { margin-top: 7px; }
+
+.run-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 7px 10px; margin-bottom: 16px; }
+.run-heading h2 { min-width: 0; flex: 1 1 280px; font-size: 1.25rem; line-height: 1.5; overflow-wrap: anywhere; }
+.run-status { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 5px; background: var(--wash); font-size: 13px; font-weight: 750; }
+.run-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.success { color: var(--accent); }
+.warning { color: var(--warn); }
+.danger { color: var(--danger); }
+.run-status.success { background: var(--tint); }
+.run-status.warning { background: var(--warn-bg); }
+.run-status.danger { background: var(--danger-bg); }
+
+.progress-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0 0 16px; padding: 0; list-style: none; }
+.progress-steps li { display: flex; align-items: center; gap: 6px; padding-bottom: 7px; border-bottom: 2px solid var(--line); }
+.progress-steps li.done, .progress-steps li.current { border-color: var(--accent); }
+.progress-steps strong, .progress-steps small { display: block; font-size: 12px; }
+.progress-steps small { color: var(--muted); }
+.step-marker { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font: 700 12px/1 var(--mono); }
+.step-marker .ui-icon { width: 14px; height: 14px; }
+.done .step-marker { border-color: var(--tint); background: var(--tint); color: var(--accent); }
+.current .step-marker { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+
+.decision-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; margin-bottom: 16px; padding: 13px; border: 1px solid #e5cf9d; border-radius: var(--control-radius); background: var(--warn-bg); }
+.decision-card > .ui-icon { margin-top: 1px; color: var(--warn); }
+.action-status { color: var(--warn); font-size: 13px; font-weight: 700; }
+.clarification-summary { margin-top: 8px; color: var(--warn); font-size: 13px; overflow-wrap: anywhere; }
+.decision-card h3 { margin-top: 4px; font-size: 17px; }
+.decision-message { margin-top: 5px; overflow-wrap: anywhere; }
+.decision-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.decision-card > div > .ui-button { margin-top: 10px; }
+.clarification-form { display: grid; gap: 6px; margin-top: 11px; }
+.clarification-form button { justify-self: start; margin-top: 2px; }
+.decision-error, .action-status { margin-top: 8px; }
+
+.timeline { margin-top: 14px; border-top: 1px solid var(--line); }
+.timeline summary { min-height: 44px; padding: 10px 0; color: var(--accent); }
+.timeline summary span { margin-left: 10px; color: var(--muted); font-size: 12px; }
+.timeline ol { margin: 0; padding: 0; list-style: none; }
+.timeline li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; padding-block: 9px; border-top: 1px solid var(--line); }
+.timeline-icon { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 5px; background: var(--wash); }
+.timeline-icon.warning { background: var(--warn-bg); }
+.timeline-icon.danger { background: var(--danger-bg); }
+.timeline-icon .ui-icon { width: 15px; height: 15px; }
+.timeline li strong { font-size: 14px; }
+.timeline li p, .timeline li small { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+
+.report { padding-top: 11px; border-top: 1px solid var(--line); }
+.report > h3 { margin-bottom: 12px; font-size: 1.23rem; }
+.report-body { max-width: 72ch; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
+.report-body h4 { margin-top: 14px; font-size: 15px; }
+.report-body p { margin-block: 5px 8px; }
+.report-body ul { margin: 6px 0 10px; padding-left: 1.45em; }
+.report-body li { margin-block: 4px; }
+.report-citation { min-height: 25px; margin-inline: 2px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--tint); color: var(--accent); font: 700 12px/1.3 var(--mono); text-decoration: underline; }
+.report-citation:hover { background: #d6e1c8; }
+
+.conflict-summary { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; margin: 9px 10px; padding: 8px; border: 1px solid #e5cf9d; border-radius: 6px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.conflict-summary .ui-icon { width: 15px; height: 15px; margin-top: 2px; }
+.evidence-list li { padding: 10px 12px; overflow-wrap: anywhere; }
+.evidence-list li + li { border-top: 1px solid var(--line); }
+.evidence-list li:focus-visible, .evidence-list li.highlighted { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--wash); }
+.evidence-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; color: var(--muted); font-size: 12px; }
+.evidence-meta b { color: var(--accent); font: 700 12px/1.3 var(--mono); }
+.evidence-list h3 { margin-block: 4px 3px; font-size: 14px; }
+.evidence-list li p, .evidence-list li a { font-size: 13px; }
+.evidence-list li a { display: inline-flex; min-height: 31px; align-items: center; gap: 4px; }
+.evidence-list li .ui-icon { width: 14px; height: 14px; }
+.evidence-disclosure { width: calc(100% - 20px); margin: 3px 10px 9px; }
+@media (max-width: 1100px) {
+  .agent-grid { grid-template-columns: minmax(0, 1fr) minmax(225px, .47fr); }
+  .task-column { grid-area: 1 / 1; }
+  .evidence-rail { grid-area: 1 / 2; }
+  .thread-rail { grid-area: 2 / 1 / auto / span 2; }
+  .history-toggle { display: inline-flex; }
+  .thread-history:not(.expanded) { display: none; }
+  .thread-rail .rail-heading { border-bottom: 0; }
+  .thread-history { border-top: 1px solid var(--line); }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+@media (max-width: 760px) {
+  .agent-grid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .task-column, .evidence-rail, .thread-rail { grid-area: auto; }
+  .task-composer, .task-starter, .run-card { padding-inline: 13px; }
+  .task-composer, .run-card { padding-top: 14px; }
+  .run-heading { margin-bottom: 11px; }
+  .view-actions .ui-button { justify-content: start; }
+  .evidence-rail-toggle { display: inline-flex; min-height: 44px; }
+  .evidence-content:not(.expanded) { display: none; }
+}
+@media (max-width: 430px) {
+  .progress-steps li { align-items: start; flex-direction: column; gap: 3px; }
+  .decision-card { gap: 6px; padding-inline: 8px; }
+}
 </style>

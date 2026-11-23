@@ -1,211 +1,153 @@
 <template>
   <section class="ask-page">
-    <header class="ask-intro">
+    <header class="view-heading">
       <div>
-        <p>AGRIREG INTELLIGENCE · ASSISTANT</p>
-        <h1>用自然语言，追溯农药知识</h1>
-        <span>答案来自知识图谱中的实体与关系，并附带可继续探索的依据。</span>
+        <h1>AI 问答</h1>
+        <p>用自然语言查登记、作物和病虫害，点击回答中的引用核对依据。</p>
       </div>
-      <div class="ask-intro-actions">
-        <button
-          type="button"
-          class="history-toggle"
-          aria-controls="recent-conversations"
-          :aria-expanded="sidebarOpen ? 'true' : 'false'"
-          @click="sidebarOpen = true"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-          最近对话
-        </button>
-        <router-link to="/graph" class="graph-link">
-          打开知识图谱
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-        </router-link>
-      </div>
+      <router-link to="/graph" class="ui-button">打开知识图谱 <UiIcon name="arrow" /></router-link>
     </header>
 
-    <div :class="['chat-workspace', { 'sidebar-open': sidebarOpen }]">
-      <button
-        v-if="sidebarOpen"
-        type="button"
-        class="sidebar-backdrop"
-        aria-label="关闭最近对话"
-        @click="sidebarOpen = false"
-      ></button>
-
-      <aside id="recent-conversations" class="conversation-sidebar" aria-label="最近对话">
-        <div class="history-heading">
-          <div>
-            <span>对话记录</span>
-            <strong>最近对话</strong>
-          </div>
-          <button type="button" class="mobile-close" aria-label="关闭最近对话" @click="sidebarOpen = false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
-          </button>
+    <div class="chat-workspace">
+      <div class="chat-shell" :class="{ 'has-messages': messages.length || restoring }">
+        <div v-if="restoring" class="restore-state" role="status">
+          <span class="ui-skeleton" aria-hidden="true"></span> 正在打开对话…
         </div>
 
-        <button type="button" class="new-conversation" @click="newConversation">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          新建对话
-        </button>
-
-        <p v-if="historyLoading" class="history-status" role="status">正在载入对话…</p>
-        <p v-else-if="historyError" class="history-status error">{{ historyError }}</p>
-        <nav v-else-if="conversations.length" class="conversation-list" aria-label="对话列表">
-          <div v-for="conversation in conversations" :key="conversation.id" class="conversation-row">
-            <button
-              type="button"
-              :class="['conversation-item', { active: conversation.id === activeConversationId }]"
-              :aria-current="conversation.id === activeConversationId ? 'page' : undefined"
-              @click="openConversation(conversation.id)"
-            >
-              <span>{{ conversation.title }}</span>
-              <small>{{ formatConversationTime(conversation.updatedAt) }}</small>
-            </button>
-            <button
-              type="button"
-              class="delete-conversation"
-              :aria-label="`删除对话：${conversation.title}`"
-              @click.stop="deleteConversation(conversation)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>
-            </button>
-          </div>
-        </nav>
-        <div v-else class="history-empty">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H9l-4 3V5Z"/></svg>
-          <p>还没有历史对话</p>
-          <span>发送第一个问题后会自动保存。</span>
-        </div>
-        <p class="history-note">问题、回答与图谱依据会一起保存。</p>
-      </aside>
-
-      <div class="chat-shell">
-        <main ref="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions">
-        <article
-          v-for="message in messages"
-          :key="message.id"
-          :class="['message', message.role]"
-        >
-          <div class="avatar" aria-hidden="true">{{ message.role === 'user' ? '你' : 'AR' }}</div>
-          <div class="message-body">
-            <strong>{{ message.role === 'user' ? '你' : 'AgriReg AI' }}</strong>
-            <p v-if="message.role === 'user'">{{ message.content }}</p>
-            <p v-else>
-              <template v-for="(part, partIndex) in answerParts(message)">
-                <button
-                  v-if="part.evidenceIndex"
-                  :key="'citation-' + partIndex"
-                  type="button"
-                  class="citation-link"
-                  :aria-label="`在图谱中查看第 ${part.evidenceIndex} 条依据`"
-                  @click="openEvidenceByIndex(message, part.evidenceIndex)"
-                >[{{ part.evidenceIndex }}]</button>
-                <span v-else :key="'text-' + partIndex">{{ part.text }}</span>
-              </template>
-            </p>
-
-            <div v-if="message.focusEntities && message.focusEntities.length" class="focus-row">
-              <span>识别实体</span>
-              <button
-                v-for="entity in message.focusEntities"
-                :key="entity"
-                type="button"
-                @click="openGraph(entity)"
-              >{{ entity }}</button>
-            </div>
-
-            <section v-if="message.evidence && message.evidence.length" class="evidence-panel" aria-label="回答引用的图谱关系">
-              <div class="evidence-title">
-                <strong>图谱依据</strong>
-                <span>{{ message.evidence.length }} 条依据</span>
-              </div>
-              <button
-                v-for="fact in visibleEvidence(message)"
-                :key="fact.index"
-                type="button"
-                class="evidence-item"
-                @click="openEvidence(fact)"
-              >
-                <b>[{{ fact.index }}]</b>
-                <span>{{ fact.sourceName }}</span>
-                <em>{{ fact.factType === 'attribute' ? '属性' : relationName(fact.relation) }}</em>
-                <span>{{ fact.factType === 'attribute' ? `${fact.property}：${fact.value}` : fact.targetName }}</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-              </button>
-              <button
-                v-if="message.evidence.length > 8"
-                type="button"
-                class="evidence-toggle"
-                :aria-expanded="message.showAllEvidence ? 'true' : 'false'"
-                @click="toggleEvidence(message)"
-              >{{ message.showAllEvidence ? '收起图谱依据' : `查看全部 ${message.evidence.length} 条图谱依据` }}</button>
-            </section>
-
-            <div v-if="message.followUps && message.followUps.length" class="follow-ups">
-              <button
-                v-for="followUp in message.followUps"
-                :key="followUp"
-                type="button"
-                @click="submitQuestion(followUp)"
-              >{{ followUp }}</button>
-            </div>
-          </div>
-        </article>
-
-        <article v-if="loading" class="message assistant" role="status">
-          <div class="avatar" aria-hidden="true">AR</div>
-          <div class="message-body">
-            <strong>AgriReg AI</strong>
-            <div class="thinking"><i></i><i></i><i></i><span>正在检索图谱关系并组织答案…</span></div>
-          </div>
-        </article>
-        </main>
-
-        <section v-if="messages.length === 1 && !historyLoading" class="starter-panel">
-        <p>可以这样问</p>
-        <div>
-          <button v-for="question in starters" :key="question" type="button" @click="submitQuestion(question)">
-            {{ question }}<span aria-hidden="true">↗</span>
-          </button>
-        </div>
+        <section v-else-if="!messages.length" class="ask-start" aria-labelledby="ask-start-title">
+          <span class="ask-mark" aria-hidden="true"><UiIcon name="chat" /></span>
+          <h2 id="ask-start-title">你想查哪条登记线索？</h2>
+          <p>输入登记号或实体名称，可以让检索更准确。</p>
         </section>
 
+        <div v-else ref="messages" class="messages" role="log" aria-label="问答消息" aria-relevant="additions">
+          <article v-for="message in messages" :key="message.id" :id="'answer-' + message.id" class="message" :class="message.role">
+            <div class="avatar" aria-hidden="true">{{ message.role === 'user' ? '你' : 'AR' }}</div>
+            <div class="message-body">
+              <strong class="message-author">{{ message.role === 'user' ? '你' : 'AgriReg AI' }}</strong>
+              <div v-if="message.retryQuestion" class="ui-error" role="alert">
+                <p>{{ message.content }}</p>
+                <button v-if="message === messages[messages.length - 1]" type="button" class="ui-button"
+                  :disabled="loading" @click="submitQuestion(message.retryQuestion, message.id)">重新发送</button>
+              </div>
+              <p v-else-if="message.role === 'user'" class="message-text">{{ message.content }}</p>
+              <p v-else class="message-text">
+                <template v-for="(part, partIndex) in answerParts(message)">
+                  <router-link v-if="part.fact" :key="'citation-' + partIndex" :to="evidenceLocation(part.fact)"
+                    class="citation-link" :aria-label="'在图谱中查看第 ' + part.fact.index + ' 条依据'">[{{ part.fact.index }}]</router-link>
+                  <span v-else :key="'text-' + partIndex">{{ part.text }}</span>
+                </template>
+              </p>
+
+              <div v-if="message.focusEntities && message.focusEntities.length" class="focus-row">
+                <span>识别实体</span>
+                <router-link v-for="entity in message.focusEntities" :key="entity" :to="graphLocation(entity)">{{ entity }}</router-link>
+              </div>
+
+              <section v-if="message.evidence && message.evidence.length" class="evidence-panel"
+                :aria-labelledby="'answer-evidence-title-' + message.id">
+                <div class="evidence-title">
+                  <h2 :id="'answer-evidence-title-' + message.id">图谱依据</h2>
+                  <span>{{ message.evidence.length }} 条</span>
+                </div>
+                <ol :id="'answer-evidence-' + message.id">
+                  <li v-for="fact in visibleEvidence(message)" :key="fact.index">
+                    <router-link class="evidence-item" :to="evidenceLocation(fact)">
+                      <b>[{{ fact.index }}]</b>
+                      <span class="fact-summary">
+                        <strong>{{ fact.sourceName || fact.targetName }}</strong>
+                        <em>{{ fact.factType === 'attribute' ? '属性' : relationName(fact.relation) }}</em>
+                        <span>{{ fact.factType === 'attribute' ? fact.property + '：' + fact.value : fact.targetName }}</span>
+                      </span>
+                      <UiIcon name="arrow" />
+                    </router-link>
+                  </li>
+                </ol>
+                <button v-if="message.evidence.length > 8" type="button" class="ui-link text-button evidence-toggle"
+                  :aria-expanded="String(Boolean(message.showAllEvidence))" :aria-controls="'answer-evidence-' + message.id"
+                  @click="message.showAllEvidence = !message.showAllEvidence">
+                  {{ message.showAllEvidence ? '收起其余依据' : '查看全部 ' + message.evidence.length + ' 条依据' }}
+                </button>
+              </section>
+
+              <section v-if="message.followUps && message.followUps.length" class="follow-ups"
+                :aria-labelledby="'follow-ups-' + message.id">
+                <h2 :id="'follow-ups-' + message.id">继续追问</h2>
+                <button v-for="followUp in message.followUps" :key="followUp" class="ui-button" type="button"
+                  :disabled="loading || restoring" @click="submitQuestion(followUp)">{{ followUp }}</button>
+              </section>
+            </div>
+          </article>
+
+          <div v-if="loading" class="thinking" role="status">
+            <span class="ui-skeleton" aria-hidden="true"></span>
+            正在检索关系并组织答案…
+          </div>
+        </div>
+
         <form class="composer" @submit.prevent="submitQuestion()">
-        <label class="sr-only" for="assistant-input">输入农药知识问题</label>
-        <textarea
-          id="assistant-input"
-          name="assistant-question"
-          v-model="input"
-          rows="2"
-          maxlength="300"
-          autocomplete="off"
-          aria-describedby="assistant-note"
-          placeholder="询问农药、作物、病虫害、有效成分或作用机制…"
-          @keydown.enter.exact="handleComposerEnter"
-        ></textarea>
-        <button type="submit" :disabled="loading || historyLoading || input.trim().length < 2" aria-label="发送问题">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-8-5 16-3-6-8-2Z"/><path d="m12 14 8-10"/></svg>
-        </button>
-        <small id="assistant-note">按 Enter 发送，Shift + Enter 换行。结论附带可点击的图谱依据。</small>
+          <label class="sr-only" for="assistant-input">输入农药知识问题</label>
+          <textarea id="assistant-input" ref="question" name="assistant-question" v-model="input" rows="2"
+            required minlength="2" maxlength="300" class="ui-input" aria-describedby="assistant-note"
+            placeholder="例如，哪些登记产品关联了小麦叶斑病？" @keydown.enter.exact="handleComposerEnter"></textarea>
+          <button class="ui-button primary" type="submit" :disabled="loading || restoring">
+            <UiIcon name="send" /> {{ loading ? '回答中…' : '发送问题' }}
+          </button>
+          <small id="assistant-note">至少输入 2 个字。Enter 发送，Shift + Enter 换行。</small>
         </form>
+
+        <section v-if="!messages.length && !restoring" class="starter-panel" aria-labelledby="ask-examples-title">
+          <h2 id="ask-examples-title">可以这样问</h2>
+          <div>
+            <button v-for="question in starters" :key="question" type="button" @click="submitQuestion(question)">
+              <UiIcon name="chat" /> <span>{{ question }}</span> <UiIcon name="arrow" />
+            </button>
+          </div>
+        </section>
       </div>
+      <aside class="conversation-sidebar" aria-labelledby="history-title">
+        <div class="history-heading">
+          <h2 id="history-title">最近对话</h2>
+          <button class="ui-button history-toggle" type="button" aria-controls="recent-conversations"
+            :aria-expanded="String(historyExpanded)" @click="historyExpanded = !historyExpanded">
+            {{ historyExpanded ? '收起' : '查看记录' }} <UiIcon name="chevron" />
+          </button>
+          <button class="ui-button sidebar-new" type="button" :disabled="loading || restoring" @click="newConversation">
+            <UiIcon name="plus" /> 新建对话
+          </button>
+        </div>
+        <div id="recent-conversations" class="conversation-history" :class="{ expanded: historyExpanded }">
+          <p v-if="historyLoading" class="history-status" role="status">正在载入对话…</p>
+          <div v-if="historyError" class="history-status">
+            <p role="alert">{{ historyError }}</p>
+            <button type="button" class="ui-link text-button" @click="loadConversations">刷新对话列表</button>
+          </div>
+          <ul v-if="conversations.length" class="conversation-list">
+            <li v-for="conversation in conversations" :key="conversation.id" class="conversation-row"
+              :class="{ active: String(conversation.id) === String(activeConversationId) }">
+              <button type="button" class="conversation-item"
+                :aria-current="String(conversation.id) === String(activeConversationId) ? 'true' : undefined"
+                :disabled="loading || restoring" @click="openConversation(conversation.id)">
+                <span>{{ conversation.title }}</span>
+                <small>{{ formatConversationTime(conversation.updatedAt) }}</small>
+              </button>
+              <button type="button" class="delete-conversation" :disabled="loading || restoring"
+                :aria-label="'删除对话：' + conversation.title" @click="deleteConversation(conversation)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="!historyLoading && !historyError" class="history-status">提问后，问题、回答和依据会保存在这里。</p>
+        </div>
+      </aside>
     </div>
   </section>
 </template>
 
 <script>
 import service from '@/utils/axios';
-
-const INTRO_MESSAGE = {
-  id: 'intro',
-  role: 'assistant',
-  content: '告诉我你想了解的农药、作物或病虫害。我会先定位图谱实体，再沿关系检索并给出可追溯的回答。'
-};
-
-function freshMessages() {
-  return [{ ...INTRO_MESSAGE }];
-}
+import UiIcon from '@/components/UiIcon.vue';
+import { citationParts } from '@/utils/citations';
 
 function visitorId() {
   const key = 'agrireg.visitorId';
@@ -213,7 +155,7 @@ function visitorId() {
   if (!value) {
     value = window.crypto && window.crypto.randomUUID
       ? window.crypto.randomUUID()
-      : `visitor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : 'visitor-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     localStorage.setItem(key, value);
   }
   return value;
@@ -221,24 +163,27 @@ function visitorId() {
 
 export default {
   name: 'AnswerView',
+  components: { UiIcon },
   data() {
     return {
       input: '',
       loading: false,
       historyLoading: false,
+      historyVersion: 0,
+      restoring: false,
       historyError: '',
-      sidebarOpen: false,
+      historyExpanded: false,
       visitorId: '',
       activeConversationId: '',
       conversations: [],
       lastQuery: '',
       messageSequence: 1,
+      messages: [],
       starters: [
         'Chlorantraniliprole 与哪些作物或病虫害有关？',
         '哪些农药登记可以防治 Leaf spot disease？',
         'Spring barley 关联了哪些病害和有效成分？'
       ],
-      messages: freshMessages(),
       relationNames: {
         TREATS: '防治',
         INFECTS: '感染',
@@ -255,100 +200,122 @@ export default {
       if (question && question !== this.lastQuery && !this.activeConversationId) this.submitQuestion(question);
     },
     '$route.query.conversation'(conversationId) {
-      if (conversationId && conversationId !== this.activeConversationId) {
+      if (conversationId && String(conversationId) !== String(this.activeConversationId)) {
         this.openConversation(String(conversationId), false);
       }
     }
   },
-  async mounted() {
+  mounted() {
+    document.title = 'AI 问答 · AgriReg AI';
     this.visitorId = visitorId();
-    await this.loadConversations();
+    this.loadConversations();
     const conversationId = String(this.$route.query.conversation || '');
-    if (conversationId) {
-      await this.openConversation(conversationId, false);
-    } else if (this.$route.query.q) {
-      this.submitQuestion(this.$route.query.q);
-    }
+    if (conversationId) this.openConversation(conversationId, false);
+    else if (this.$route.query.q) this.submitQuestion(this.$route.query.q);
   },
   methods: {
     async loadConversations() {
+      const version = ++this.historyVersion;
       this.historyLoading = true;
       this.historyError = '';
       try {
         const response = await service.get('/api/conversations', {
-          params: { visitorId: this.visitorId }
+          params: { visitorId: this.visitorId },
+          timeout: 8000
         });
-        this.conversations = Array.isArray(response.data) ? response.data : [];
+        if (version === this.historyVersion) this.conversations = Array.isArray(response.data) ? response.data : [];
       } catch (error) {
+        if (version !== this.historyVersion) return;
         this.historyError = '对话记录暂时无法载入。';
+        this.historyExpanded = true;
       } finally {
-        this.historyLoading = false;
+        if (version === this.historyVersion) this.historyLoading = false;
       }
     },
     async openConversation(conversationId, updateRoute = true) {
-      if (!conversationId || this.loading) return;
-      this.historyLoading = true;
+      if (!conversationId || this.loading || this.restoring) return;
+      this.restoring = true;
       this.historyError = '';
       try {
-        const response = await service.get(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-          params: { visitorId: this.visitorId }
+        const response = await service.get('/api/conversations/' + encodeURIComponent(conversationId), {
+          params: { visitorId: this.visitorId },
+          timeout: 10000
         });
-        const result = response.data || {};
-        const storedMessages = Array.isArray(result.messages) ? result.messages : [];
-        this.messages = freshMessages().concat(storedMessages.map(message => ({
+        const stored = Array.isArray(response.data?.messages) ? response.data.messages : [];
+        this.messages = stored.map(message => ({
           ...message,
-          id: `db-${message.id}`,
+          id: 'db-' + message.id,
           focusEntities: message.focusEntities || [],
           evidence: message.evidence || [],
           followUps: message.followUps || [],
           showAllEvidence: false
-        })));
+        }));
         this.activeConversationId = conversationId;
         this.lastQuery = '';
-        this.sidebarOpen = false;
+        this.input = '';
+        this.historyExpanded = false;
         if (updateRoute) {
           this.$router.push({ path: '/ask', query: { conversation: conversationId } }).catch(() => {});
+          this.$nextTick(() => this.$refs.question?.focus({ preventScroll: true }));
         }
-        this.scrollToBottom();
       } catch (error) {
-        this.historyError = '这条对话不存在或已被删除。';
+        this.historyError = error.response?.status === 404
+          ? '这条对话不存在或已被删除。'
+          : '暂时无法打开这条对话，请重试。';
+        this.historyExpanded = true;
       } finally {
-        this.historyLoading = false;
+        this.restoring = false;
+        this.revealMessage(this.messages[this.messages.length - 1]?.id);
       }
     },
     newConversation() {
       this.activeConversationId = '';
       this.lastQuery = '';
       this.input = '';
-      this.messages = freshMessages();
-      this.sidebarOpen = false;
+      this.messages = [];
+      this.historyExpanded = false;
       this.$router.push({ path: '/ask' }).catch(() => {});
-      this.$nextTick(() => {
-        const input = document.getElementById('assistant-input');
-        if (input) input.focus();
-      });
+      this.$nextTick(() => this.$refs.question?.focus());
     },
     async deleteConversation(conversation) {
-      if (!window.confirm(`删除“${conversation.title}”？`)) return;
+      if (!window.confirm('删除“' + conversation.title + '”？')) return;
       try {
-        await service.delete(`/api/conversations/${encodeURIComponent(conversation.id)}`, {
+        await service.delete('/api/conversations/' + encodeURIComponent(conversation.id), {
           params: { visitorId: this.visitorId }
         });
         this.conversations = this.conversations.filter(item => item.id !== conversation.id);
-        if (this.activeConversationId === conversation.id) this.newConversation();
+        if (String(this.activeConversationId) === String(conversation.id)) this.newConversation();
       } catch (error) {
-        this.historyError = '这条对话没有删除成功。';
+        this.historyError = '这条对话没有删除成功，请重试。';
       }
     },
-    async submitQuestion(preset) {
+    async submitQuestion(preset, retryMessageId) {
       const question = String(preset || this.input).trim();
-      if (question.length < 2 || question.length > 300 || this.loading || this.historyLoading) return;
+      if (this.loading || this.restoring) return;
+      if (question.length < 2 || question.length > 300) {
+        if (!preset) {
+          const input = this.$refs.question;
+          input.setCustomValidity('请输入 2 至 300 个字。');
+          input.reportValidity();
+          input.setCustomValidity('');
+        }
+        return;
+      }
       this.lastQuery = question;
-      this.messages.push({ id: `local-${this.messageSequence++}`, role: 'user', content: question });
-      this.input = '';
+      if (retryMessageId) {
+        this.messages = this.messages.filter(message => message.id !== retryMessageId);
+      } else {
+        const id = 'local-' + this.messageSequence++;
+        this.messages.push({ id, role: 'user', content: question });
+        this.input = '';
+      }
       this.loading = true;
-      this.scrollToBottom();
+      this.$nextTick(() => {
+        const messages = this.$refs.messages;
+        if (messages) messages.scrollTop = messages.scrollHeight;
+      });
 
+      const id = 'local-' + this.messageSequence++;
       try {
         const response = await service.post('/api/assistant/ask', {
           question,
@@ -358,7 +325,7 @@ export default {
         const result = response.data || {};
         this.activeConversationId = result.conversationId || this.activeConversationId;
         this.messages.push({
-          id: `local-${this.messageSequence++}`,
+          id,
           role: 'assistant',
           content: result.answer || '没有找到能够支持回答的图谱关系。',
           focusEntities: result.focusEntities || [],
@@ -366,59 +333,39 @@ export default {
           followUps: result.followUps || [],
           showAllEvidence: false
         });
-        await this.loadConversations();
+        this.loadConversations();
         if (this.activeConversationId) {
-          this.$router.replace({
-            path: '/ask',
-            query: { conversation: this.activeConversationId }
-          }).catch(() => {});
+          this.$router.replace({ path: '/ask', query: { conversation: this.activeConversationId } }).catch(() => {});
         }
       } catch (error) {
-        const message = error.response && error.response.data && error.response.data.message
-          ? error.response.data.message
-          : '这次没有获得答案，请稍后再试。';
-        this.messages.push({ id: `local-${this.messageSequence++}`, role: 'assistant', content: message });
+        const content = error.response?.data?.message || '问答服务暂时没有返回结果，请重试。';
+        this.messages.push({ id, role: 'assistant', content, retryQuestion: question });
       } finally {
         this.loading = false;
-        this.scrollToBottom();
+        this.revealMessage(id);
       }
     },
     relationName(relation) {
       return this.relationNames[relation] || relation || '相关';
     },
     visibleEvidence(message) {
-      if (!message.evidence) return [];
       return message.showAllEvidence ? message.evidence : message.evidence.slice(0, 8);
     },
-    toggleEvidence(message) {
-      this.$set(message, 'showAllEvidence', !message.showAllEvidence);
-    },
     handleComposerEnter(event) {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
-      this.submitQuestion();
+      event.currentTarget.form.requestSubmit();
     },
     answerParts(message) {
-      const content = String(message.content || '').replace(/\*\*/g, '');
-      if (!message.evidence || !message.evidence.length) return [{ text: content }];
-      return content.split(/(\[\d+\])/g).filter(Boolean).map(part => {
-        const match = part.match(/^\[(\d+)\]$/);
-        return match ? { evidenceIndex: Number(match[1]) } : { text: part };
-      });
+      return citationParts(message.content, message.evidence);
     },
-    openEvidenceByIndex(message, index) {
-      const fact = (message.evidence || []).find(item => Number(item.index) === Number(index));
-      if (fact) this.openEvidence(fact);
-    },
-    openEvidence(fact) {
-      if (fact.factType === 'attribute') {
-        this.openGraph(fact.sourceName);
-        return;
-      }
-      this.$router.push({
-        path: '/graph',
+    evidenceLocation(fact) {
+      const location = this.graphLocation(fact.sourceName || fact.targetName);
+      if (fact.factType === 'attribute') return location;
+      return {
+        ...location,
         query: {
-          q: fact.sourceName || fact.targetName,
+          ...location.query,
           evidenceSourceId: fact.sourceId == null ? undefined : String(fact.sourceId),
           evidenceTargetId: fact.targetId == null ? undefined : String(fact.targetId),
           evidenceSource: fact.sourceName || '',
@@ -426,23 +373,32 @@ export default {
           evidenceRelation: fact.relation || 'RELATED_TO',
           evidenceIndex: fact.index == null ? '1' : String(fact.index)
         }
-      }).catch(() => {});
+      };
     },
-    openGraph(keyword) {
-      this.$router.push({ path: '/graph', query: { q: keyword } }).catch(() => {});
+    graphLocation(keyword) {
+      return { path: '/graph', query: { q: keyword } };
     },
     formatConversationTime(value) {
       const time = new Date(value);
       if (Number.isNaN(time.getTime())) return '';
-      const now = new Date();
-      if (time.toDateString() === now.toDateString()) {
+      if (time.toDateString() === new Date().toDateString()) {
         return time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
       }
       return time.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
     },
-    scrollToBottom() {
+    revealMessage(id) {
+      if (!id) return;
       this.$nextTick(() => {
-        if (this.$refs.messages) this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight;
+        const messages = this.$refs.messages;
+        const message = document.getElementById('answer-' + id);
+        if (!messages || !message) return;
+        if (messages.scrollHeight > messages.clientHeight) {
+          const previous = message.previousElementSibling;
+          const context = previous?.classList.contains('user') && previous.offsetHeight < 140 ? previous : message;
+          messages.scrollTop += context.getBoundingClientRect().top - messages.getBoundingClientRect().top - 12;
+        } else if (message.getBoundingClientRect().top >= window.innerHeight) {
+          message.scrollIntoView({ block: 'start' });
+        }
       });
     }
   }
@@ -450,239 +406,112 @@ export default {
 </script>
 
 <style scoped>
-.ask-page { max-width: 1320px; margin: 0 auto; color: #172033; }
-.ask-page button, .ask-page a { touch-action: manipulation; }
-.ask-page button:focus-visible, .ask-page textarea:focus-visible, .ask-page a:focus-visible { outline: 3px solid rgba(79,110,247,.46); outline-offset: 2px; }
-.ask-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 5px 4px 24px; }
-.ask-intro p { margin: 0 0 7px; color: #4f6ef7; font-size: 10px; font-weight: 800; letter-spacing: .15em; }
-.ask-intro h1 { margin: 0; font-size: clamp(27px, 3.3vw, 43px); line-height: 1.15; letter-spacing: -.04em; text-wrap: balance; }
-.ask-intro span { display: block; margin-top: 10px; color: #667085; font-size: 14px; }
-.ask-intro-actions { display: flex; align-items: center; gap: 8px; }
-.graph-link, .history-toggle { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; flex: 0 0 auto; padding: 10px 13px; border: 1px solid #d8deea; border-radius: 10px; background: #fff; color: #43506a; cursor: pointer; font-size: 12px; font-weight: 700; text-decoration: none; }
-.graph-link:hover { border-color: #9cacfa; color: #3654d8; }
-.graph-link svg, .history-toggle svg { width: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chat-workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); align-items: start; gap: 16px; }
+.chat-shell { grid-area: 1 / 2; }
+.conversation-sidebar { grid-area: 1 / 1; }
+.conversation-sidebar, .chat-shell { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.history-heading { display: grid; gap: 11px; padding: 14px; border-bottom: 1px solid var(--line); }
+.history-heading h2 { font-size: 16px; }
 .history-toggle { display: none; }
-.chat-workspace { position: relative; display: grid; height: min(720px, calc(100vh - 190px)); min-height: 540px; grid-template-columns: 250px minmax(0,1fr); overflow: hidden; border: 1px solid #d8deea; border-radius: 20px; background: #fff; box-shadow: 0 20px 54px rgba(35,48,82,.1); }
-.conversation-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid #e0e5ef; background: #f7f8fb; }
-.history-heading { display: flex; min-height: 67px; align-items: center; justify-content: space-between; padding: 13px 15px 10px; }
-.history-heading span, .history-heading strong { display: block; }
-.history-heading span { margin-bottom: 3px; color: #7a8497; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
-.history-heading strong { font-size: 15px; }
-.mobile-close { display: none; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 10px; background: transparent; color: #657087; cursor: pointer; }
-.mobile-close svg, .new-conversation svg, .delete-conversation svg, .history-empty svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.mobile-close svg { width: 18px; }
-.new-conversation { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; margin: 0 12px 12px; border: 1px solid #cfd7e6; border-radius: 10px; background: #fff; color: #3654d8; cursor: pointer; font-size: 12px; font-weight: 800; }
-.new-conversation:hover { border-color: #9bacf7; background: #f2f4ff; }
-.new-conversation svg { width: 16px; }
-.conversation-list { min-height: 0; flex: 1; padding: 2px 8px 12px; overflow-y: auto; overscroll-behavior: contain; }
-.conversation-row { display: grid; grid-template-columns: minmax(0,1fr) 44px; align-items: center; gap: 2px; margin-bottom: 3px; }
-.conversation-item { min-width: 0; min-height: 54px; padding: 9px 10px; overflow: hidden; border: 0; border-radius: 10px; background: transparent; color: #39445b; cursor: pointer; text-align: left; }
-.conversation-item:hover { background: #eef1f6; }
-.conversation-item.active { background: #e9edff; color: #3654d8; }
+.sidebar-new { justify-content: flex-start; color: var(--accent); }
+.history-status { display: grid; gap: 4px; padding: 14px; color: var(--muted); font-size: 13px; }
+.history-status [role="alert"] { color: var(--danger); }
+.conversation-list { display: grid; gap: 4px; margin: 0; padding: 7px; list-style: none; }
+.conversation-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: var(--control-radius); }
+.conversation-row.active, .conversation-row:hover { background: var(--wash); }
+.conversation-item { min-width: 0; padding: 7px 2px 7px 7px; border: 0; background: transparent; text-align: left; }
 .conversation-item span, .conversation-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-item span { font-size: 12px; font-weight: 700; }
-.conversation-item small { margin-top: 5px; color: #8791a4; font-size: 10px; }
-.delete-conversation { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #8b94a6; cursor: pointer; }
-.delete-conversation:hover { background: #f6eae6; color: #a95035; }
-.delete-conversation svg { width: 15px; }
-.history-status { margin: 8px 14px; color: #6f7a90; font-size: 11px; line-height: 1.6; }
-.history-status.error { color: #a85236; }
-.history-empty { display: grid; flex: 1; align-content: center; justify-items: center; padding: 25px 18px; color: #7a8497; text-align: center; }
-.history-empty svg { width: 35px; }
-.history-empty p { margin: 11px 0 3px; color: #39445b; font-size: 12px; font-weight: 800; }
-.history-empty span { font-size: 10px; line-height: 1.55; }
-.history-note { margin: 0; padding: 12px 14px; border-top: 1px solid #e0e5ef; color: #7a8497; font-size: 10px; line-height: 1.5; }
-.sidebar-backdrop { display: none; }
-.chat-shell { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #fff; }
-.messages { flex: 1; overflow-y: auto; padding: clamp(22px, 4vw, 42px); scroll-behavior: smooth; }
-.message { display: grid; grid-template-columns: 38px minmax(0,1fr); gap: 13px; max-width: 940px; margin: 0 auto 28px; }
-.message.user { max-width: 760px; margin-right: 0; }
-.avatar { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; background: #203264; color: #dbe2ff; box-shadow: 0 5px 14px rgba(32,50,100,.18); font-size: 10px; font-weight: 800; }
-.user .avatar { background: #e9edff; color: #4f63bd; box-shadow: none; }
-.message-body { min-width: 0; padding-top: 2px; }
-.message-body > strong { display: block; margin-bottom: 7px; font-size: 12px; }
-.message-body > p { margin: 0; color: #344057; font-size: 14px; line-height: 1.85; text-wrap: pretty; white-space: pre-wrap; }
-.citation-link { display: inline-flex; min-width: 28px; min-height: 26px; align-items: center; justify-content: center; margin: 0 2px; padding: 0 5px; border: 1px solid #f0d99a; border-radius: 6px; background: #fff9e8; color: #8a6412; cursor: pointer; font: 700 11px/1 inherit; vertical-align: baseline; }
-.citation-link:hover { border-color: #d7b657; background: #fff4cf; color: #6f4e08; }
-.user .message-body > p { display: inline-block; padding: 11px 14px; border-radius: 4px 14px 14px; background: #eef1f7; color: #29354d; }
-.focus-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
-.focus-row > span { margin-right: 2px; color: #7a8497; font-size: 11px; }
-.focus-row button, .follow-ups button { min-height: 36px; padding: 7px 10px; border: 1px solid #dce2ee; border-radius: 999px; background: #fafbfe; color: #43506a; cursor: pointer; font-size: 11px; }
-.focus-row button:hover, .follow-ups button:hover { border-color: #9bacf7; color: #3654d8; }
-.evidence-panel { max-width: 780px; margin-top: 17px; overflow: hidden; border: 1px solid #dfe4ed; border-radius: 13px; background: #fafbfc; }
-.evidence-title { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e5e9f0; }
-.evidence-title strong { font-size: 12px; }
-.evidence-title span { color: #7a8497; font-size: 11px; font-variant-numeric: tabular-nums; }
-.evidence-item { display: grid; min-height: 44px; width: 100%; grid-template-columns: 28px minmax(90px,1fr) auto minmax(90px,1fr) 16px; align-items: center; gap: 7px; padding: 9px 11px; border: 0; border-bottom: 1px solid #e8ecf2; background: transparent; color: #39445b; cursor: pointer; text-align: left; font-size: 11px; }
-.evidence-item:last-child { border-bottom: 0; }
-.evidence-item:hover { background: #f1f3f8; }
-.evidence-item b { color: #4f6ef7; }
-.evidence-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.evidence-item em { padding: 3px 6px; border-radius: 999px; background: #eef1f6; color: #68758b; font-size: 10px; font-style: normal; }
-.evidence-item svg { width: 14px; fill: none; stroke: #8a94a7; stroke-width: 1.8; }
-.evidence-toggle { width: 100%; min-height: 42px; border: 0; background: #f2f4f8; color: #3654d8; cursor: pointer; font-size: 11px; font-weight: 700; }
-.evidence-toggle:hover { background: #e9edff; }
-.follow-ups { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
-.thinking { display: flex; align-items: center; gap: 5px; color: #6f7a90; font-size: 12px; }
-.thinking i { width: 6px; height: 6px; border-radius: 50%; background: #7189f6; animation: pulse 1s infinite alternate; }
-.thinking i:nth-child(2) { animation-delay: .2s; }
-.thinking i:nth-child(3) { animation-delay: .4s; }
-.thinking span { margin-left: 5px; }
-.starter-panel { padding: 0 clamp(22px,4vw,42px) 17px 91px; }
-.starter-panel > p { margin: 0 0 8px; color: #7a8497; font-size: 11px; }
-.starter-panel > div { display: flex; flex-wrap: wrap; gap: 7px; }
-.starter-panel button { display: inline-flex; min-height: 40px; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid #dce2ee; border-radius: 9px; background: #fafbfe; color: #4b5870; cursor: pointer; font-size: 11px; }
-.starter-panel button:hover { border-color: #9bacf7; color: #3654d8; }
-.composer { position: relative; display: grid; grid-template-columns: minmax(0,1fr) 48px; gap: 9px; padding: 14px 18px 11px; border-top: 1px solid #e0e5ef; background: #fafbfc; }
-.composer textarea { width: 100%; min-height: 52px; max-height: 130px; resize: vertical; padding: 13px 14px; border: 1px solid #d4dbe8; border-radius: 12px; outline: 0; color: #172033; background: #fff; font: 14px/1.55 inherit; }
-.composer textarea:focus-visible { border-color: #91a4fb; box-shadow: 0 0 0 3px rgba(79,110,247,.1); }
-.composer > button { display: grid; height: 48px; place-items: center; align-self: start; border: 0; border-radius: 12px; background: #4f6ef7; color: #fff; cursor: pointer; }
-.composer > button:hover:not(:disabled) { background: #3e5de2; }
-.composer > button:disabled { opacity: .45; cursor: not-allowed; }
-.composer > button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.composer small { grid-column: 1 / -1; color: #7a8497; font-size: 11px; }
+.conversation-item span { font-size: 13px; font-weight: 650; }
+.conversation-item small { color: var(--muted); font-size: 12px; }
+.delete-conversation { display: grid; min-width: 36px; min-height: 40px; place-items: center; padding: 2px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); }
+.delete-conversation:hover { background: var(--danger-bg); color: var(--danger); }
+.delete-conversation svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
 
-/* Shared AgriReg visual language with the graph workspace. */
-.ask-page { max-width: 1440px; color: #171827; }
-.ask-page button,
-.ask-page textarea,
-.ask-page a { transition: color .18s ease, border-color .18s ease, background-color .18s ease, box-shadow .18s ease; }
-.ask-page button:focus-visible,
-.ask-page textarea:focus-visible,
-.ask-page a:focus-visible { outline-color: #7468e8; box-shadow: 0 0 0 5px rgba(116,104,232,.13); }
-.ask-intro { min-height: 48px; align-items: center; padding: 0 2px 12px; }
-.ask-intro p { margin-bottom: 3px; color: #7770da; font-size: 8px; letter-spacing: .2em; }
-.ask-intro h1 { font-size: clamp(20px,1.65vw,27px); letter-spacing: -.04em; }
-.ask-intro span { margin-top: 4px; color: #747583; font-size: 11px; }
-.graph-link,
-.history-toggle { min-height: 38px; border-color: rgba(72,74,104,.14); border-radius: 11px; background: rgba(255,255,255,.72); color: #666775; box-shadow: 0 7px 22px rgba(38,34,76,.05); }
-.graph-link:hover { border-color: rgba(116,104,232,.32); background: #efedff; color: #5d51cb; }
-.chat-workspace { height: min(780px, calc(100vh - 154px)); border-color: rgba(72,74,104,.14); border-radius: 22px; background: #fcfbf8; box-shadow: 0 28px 80px rgba(25,22,54,.14), 0 2px 10px rgba(25,22,54,.05); }
-.conversation-sidebar { border-right-color: rgba(72,74,104,.12); background: #f1efeb; }
-.history-heading span { color: #898793; }
-.new-conversation { border-color: rgba(72,74,104,.14); border-radius: 11px; background: #fcfbf8; color: #5d51cb; }
-.new-conversation:hover { border-color: rgba(116,104,232,.3); background: #eae7ff; }
-.conversation-item { border-radius: 11px; color: #484955; }
-.conversation-item:hover { background: #e9e6e1; }
-.conversation-item.active { background: #e8e5ff; color: #594dcc; }
-.conversation-item small,
-.history-note,
-.history-empty { color: #85838f; }
-.history-note { border-top-color: rgba(72,74,104,.12); }
-.chat-shell { background: #fcfbf8; }
-.avatar { background: linear-gradient(145deg,#2a2858,#171832); color: #ddd8ff; box-shadow: 0 7px 18px rgba(46,39,105,.2); }
-.user .avatar { background: #e8e5ff; color: #5d51cb; }
-.message-body > p { color: #383946; }
-.user .message-body > p { background: #eeece8; color: #333440; }
-.focus-row button,
-.follow-ups button,
-.starter-panel button { border-color: rgba(72,74,104,.14); background: #f8f6f2; color: #5f606c; }
-.focus-row button:hover,
-.follow-ups button:hover,
-.starter-panel button:hover { border-color: rgba(116,104,232,.32); background: #efedff; color: #5d51cb; }
-.evidence-panel { border-color: rgba(72,74,104,.13); border-radius: 14px; background: #f7f5f1; }
-.evidence-title,
-.evidence-item { border-color: rgba(72,74,104,.11); }
-.evidence-item { color: #474854; }
-.evidence-item:hover { background: #eeece8; }
-.evidence-item b { color: #6659d7; }
-.evidence-item em { background: #e9e6e1; color: #6c6d78; }
-.evidence-toggle { background: #ece9e4; color: #5d51cb; }
-.evidence-toggle:hover { background: #e6e2ff; }
-.thinking i { background: #8478ed; }
-.composer { border-top-color: rgba(72,74,104,.12); background: #f3f1ed; }
-.composer textarea { border-color: rgba(72,74,104,.17); border-radius: 14px; background: #fdfcf9; color: #242532; }
-.composer textarea:focus-visible { border-color: rgba(116,104,232,.65); box-shadow: 0 0 0 4px rgba(116,104,232,.1); }
-.composer > button { border-radius: 14px; background: linear-gradient(135deg,#7668eb,#6456d9); box-shadow: 0 8px 20px rgba(91,75,199,.22); }
-.composer > button:hover:not(:disabled) { background: linear-gradient(135deg,#695bdd,#5548c3); }
-
-/* Match the AgriReg evidence-network landing and graph workspace. */
-.ask-page { color: #edf7f1; }
-.ask-page button:focus-visible,
-.ask-page textarea:focus-visible,
-.ask-page a:focus-visible { outline-color: #a4ffcb; box-shadow: 0 0 0 5px rgba(164,255,203,.1); }
-.ask-intro p { color: #a4ffcb; }
-.ask-intro h1 { color: #edf7f1; }
-.ask-intro span { color: #91a79c; }
-.graph-link,
-.history-toggle { border-color: rgba(181,231,203,.14); background: rgba(12,25,20,.88); color: #a9bdb2; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
-.graph-link:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); color: #a4ffcb; }
-.chat-workspace { border-color: rgba(181,231,203,.16); background: #0c1914; box-shadow: 0 28px 80px rgba(0,0,0,.3), 0 2px 10px rgba(0,0,0,.16); }
-.conversation-sidebar { border-right-color: rgba(181,231,203,.12); background: #0a1612; }
-.history-heading span { color: #71877c; }
-.history-heading strong { color: #dbeae1; }
-.new-conversation { border-color: rgba(181,231,203,.14); background: #10231b; color: #a4ffcb; }
-.new-conversation:hover { border-color: rgba(164,255,203,.32); background: rgba(164,255,203,.09); }
-.conversation-item { color: #a9bdb2; }
-.conversation-item:hover { background: rgba(164,255,203,.05); }
-.conversation-item.active { background: rgba(164,255,203,.11); color: #a4ffcb; }
-.conversation-item small,
-.history-note,
-.history-empty,
-.history-status { color: #71877c; }
-.history-note { border-top-color: rgba(181,231,203,.12); }
-.history-empty p { color: #dbeae1; }
-.delete-conversation { color: #71877c; }
-.delete-conversation:hover { background: rgba(255,178,123,.08); color: #ffb27b; }
-.chat-shell { background: #0c1914; }
-.messages { background: radial-gradient(circle at 72% 8%, rgba(72,196,128,.055), transparent 24rem); }
-.avatar { background: #a4ffcb; color: #07110e; box-shadow: 0 7px 18px rgba(164,255,203,.12); }
-.user .avatar { background: rgba(123,229,255,.12); color: #7be5ff; }
-.message-body > strong { color: #edf7f1; }
-.message-body > p { color: #c2d3c9; }
-.user .message-body > p { border: 1px solid rgba(181,231,203,.1); background: #10231b; color: #d8e9df; }
-.focus-row > span,
-.starter-panel > p,
-.thinking { color: #71877c; }
-.focus-row button,
-.follow-ups button,
-.starter-panel button { border-color: rgba(181,231,203,.13); background: #10231b; color: #91a79c; }
-.focus-row button:hover,
-.follow-ups button:hover,
-.starter-panel button:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); color: #a4ffcb; }
-.evidence-panel { border-color: rgba(181,231,203,.14); background: #0a1612; }
-.evidence-title,
-.evidence-item { border-color: rgba(181,231,203,.1); }
-.evidence-title strong { color: #dbeae1; }
-.evidence-title span { color: #71877c; }
-.evidence-item { color: #a9bdb2; }
-.evidence-item:hover { background: rgba(164,255,203,.05); }
-.evidence-item b { color: #a4ffcb; }
-.evidence-item em { background: #152a21; color: #81978c; }
-.evidence-item svg { stroke: #71877c; }
-.evidence-toggle { background: #10231b; color: #a4ffcb; }
-.evidence-toggle:hover { background: rgba(164,255,203,.08); }
-.citation-link { border-color: rgba(255,211,108,.25); background: rgba(255,211,108,.08); color: #ffd36c; }
-.citation-link:hover { border-color: rgba(255,211,108,.5); background: rgba(255,211,108,.13); color: #ffe4a1; }
-.thinking i { background: #a4ffcb; }
-.composer { border-top-color: rgba(181,231,203,.12); background: #0a1612; }
-.composer textarea { border-color: rgba(181,231,203,.16); background: #10231b; color: #edf7f1; }
-.composer textarea::placeholder { color: #61776c; }
-.composer textarea:focus-visible { border-color: rgba(164,255,203,.65); box-shadow: 0 0 0 4px rgba(164,255,203,.09); }
-.composer > button { background: #a4ffcb; color: #07110e; box-shadow: 0 8px 20px rgba(164,255,203,.1); }
-.composer > button:hover:not(:disabled) { background: #d3ffe5; }
-.composer small { color: #71877c; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-@keyframes pulse { to { opacity: .25; transform: translateY(-2px); } }
-@media (max-width: 680px) {
-  .ask-intro { align-items: flex-start; flex-direction: column; gap: 12px; padding: 4px 4px 16px; }
-  .ask-intro-actions { width: 100%; justify-content: flex-end; }
-  .ask-intro > div:first-child > span, .graph-link { display: none; }
-  .history-toggle { display: inline-flex; }
-  .chat-workspace { display: block; height: calc(100vh - 150px); min-height: 480px; border-radius: 15px; }
-  .conversation-sidebar { position: absolute; z-index: 7; inset: 0 auto 0 0; width: min(86vw, 310px); transform: translateX(-102%); border-right: 1px solid rgba(181,231,203,.14); box-shadow: 18px 0 44px rgba(0,0,0,.28); transition: transform .2s ease; }
-  .sidebar-open .conversation-sidebar { transform: translateX(0); }
-  .sidebar-backdrop { position: absolute; z-index: 6; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: rgba(11,22,48,.34); cursor: pointer; }
-  .composer textarea { font-size: 16px; }
-  .mobile-close { display: grid; }
-  .chat-shell { height: 100%; }
-  .messages { padding: 19px 14px; }
-  .message { grid-template-columns: 32px minmax(0,1fr); gap: 9px; }
-  .avatar { width: 31px; height: 31px; }
-  .starter-panel { padding: 0 14px 12px; }
-  .evidence-item { grid-template-columns: 24px minmax(70px,1fr) auto minmax(70px,1fr); }
-  .evidence-item svg { display: none; }
-  .composer { padding-inline: 11px; }
+.ask-start, .starter-panel, .composer { width: min(100% - 40px, 770px); margin-inline: auto; }
+.ask-start { display: grid; justify-items: start; gap: 9px; margin-block: clamp(28px, 5vw, 68px) 19px; }
+.ask-mark { display: grid; width: 44px; height: 44px; place-items: center; margin-bottom: 3px; border-radius: var(--control-radius); background: var(--tint); color: var(--accent); }
+.ask-mark .ui-icon { width: 24px; height: 24px; }
+.ask-start h2 { font-size: 1.65rem; }
+.ask-start p { color: var(--muted); }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 7px 10px; margin-bottom: 15px; }
+.composer textarea { min-height: 70px; }
+.composer .ui-button { min-width: 108px; }
+.composer small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.starter-panel { margin-block: 18px clamp(26px, 4vw, 52px); }
+.starter-panel h2, .follow-ups h2 { margin-bottom: 6px; font-size: 14px; }
+.starter-panel button {
+  display: grid;
+  width: 100%;
+  min-height: 47px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 4px 7px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
-@media (prefers-reduced-motion: reduce) { .messages { scroll-behavior: auto; } .thinking i { animation: none; } .conversation-sidebar { transition: none; } }
+.starter-panel button:hover { background: var(--wash); }
+.starter-panel .ui-icon { width: 16px; height: 16px; }
+
+.messages { position: relative; max-height: min(56vh, 640px); min-height: min(38vh, 300px); padding: 20px max(20px, calc((100% - 820px) / 2)); overflow-y: auto; }
+.has-messages .composer { width: auto; margin: 0; padding: 14px max(20px, calc((100% - 820px) / 2)); border-top: 1px solid var(--line); }
+.restore-state, .thinking { display: grid; gap: 9px; padding: 18px 20px; color: var(--muted); font-size: 14px; }
+.message { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; margin-block: 0 22px; scroll-margin-top: 6px; }
+.message:last-child { margin-bottom: 4px; }
+.avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 6px; background: var(--tint); color: var(--accent); font-size: 12px; font-weight: 750; }
+.user .avatar { background: var(--wash); }
+.message-body { max-width: 74ch; min-width: 0; overflow-wrap: anywhere; }
+.message-author { display: block; margin-block: 3px 5px; font-size: 14px; }
+.message-text { font-size: 16px; line-height: 1.7; white-space: pre-line; }
+.user .message-text { display: inline-block; padding: 6px 11px; border-radius: var(--control-radius); background: var(--wash); }
+.citation-link { display: inline-flex; align-items: center; min-height: 26px; margin-inline: 3px; padding-inline: 4px; border-radius: 4px; background: var(--tint); color: var(--accent); font: 700 .82em/1.25 var(--mono); text-decoration: underline; text-underline-offset: 2px; vertical-align: baseline; }
+.citation-link:hover { background: #d6e1c8; }
+.focus-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-top: 10px; font-size: 13px; }
+.focus-row > span, .evidence-title span { color: var(--muted); }
+.focus-row a { color: var(--accent); font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
+.evidence-panel { margin-top: 16px; border-block: 1px solid var(--line); }
+.evidence-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 9px; background: var(--wash); font-size: 12px; }
+.evidence-title h2 { font-size: 15px; }
+.evidence-panel ol { margin: 0; padding: 0; list-style: none; }
+.evidence-panel li + li { border-top: 1px solid var(--line); }
+.evidence-item { display: grid; min-height: 44px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 9px; padding: 10px 9px; font-size: 14px; }
+.evidence-item:hover { background: var(--wash); }
+.evidence-item b { color: var(--accent); font: 700 13px/1.6 var(--mono); }
+.evidence-item .ui-icon { width: 16px; height: 16px; color: var(--accent); }
+.fact-summary em { display: inline-block; margin-inline: 5px; color: var(--muted); font-size: 12px; font-style: normal; }
+.fact-summary strong { font-weight: 650; }
+.evidence-toggle { margin-left: 9px; }
+.text-button { width: fit-content; min-height: 36px; padding: 4px 0; border: 0; background: transparent; font-size: 13px; }
+.follow-ups { margin-top: 15px; }
+.follow-ups button { min-height: 38px; justify-content: start; margin: 0 6px 5px 0; text-align: left; font-size: 13px; }
+.ui-error .ui-button { margin-top: 8px; }
+
+@media (max-width: 850px) {
+  .chat-workspace { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .chat-shell, .conversation-sidebar { grid-area: auto; }
+  .history-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; padding: 8px 11px; border: 0; }
+  .history-heading h2 { margin-right: auto; }
+  .history-toggle { display: inline-flex; }
+  .sidebar-new { order: 1; }
+  .conversation-history:not(.expanded) { display: none; }
+  .conversation-history { border-top: 1px solid var(--line); }
+  .messages { max-height: none; min-height: 0; }
+  .delete-conversation { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 540px) {
+  .ask-start, .starter-panel, .composer { width: calc(100% - 26px); }
+  .ask-start { margin-top: 23px; }
+  .ask-start h2 { font-size: 1.32rem; }
+  .composer { grid-template-columns: minmax(0, 1fr); }
+  .composer .ui-button { justify-self: end; }
+  .composer small { grid-row: 2; }
+  .messages, .has-messages .composer { padding-inline: 12px; }
+  .message { gap: 7px; }
+  .avatar { width: 27px; height: 27px; }
+}
 </style>
