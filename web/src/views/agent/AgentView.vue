@@ -3,7 +3,7 @@
     <header class="view-heading">
       <div>
         <h1>任务分析</h1>
-        <p>比较登记或核验关联，按步骤查看证据、待确认差异和分析报告。</p>
+        <p>比较登记或核验关联，查看分析结果和支持证据。</p>
       </div>
       <div class="view-actions">
         <button v-if="activeRun || activeThreadId" class="ui-button primary" type="button" :disabled="starting || resuming" @click="newTask">
@@ -32,17 +32,6 @@
               <i aria-hidden="true"></i>{{ runStatus(activeRun.status) }}
             </span>
           </div>
-
-          <ol class="progress-steps" aria-label="分析进度">
-            <li v-for="(stage, index) in stages" :key="stage.key" :class="stage.state"
-              :aria-current="stage.state === 'current' ? 'step' : undefined">
-              <span class="step-marker" aria-hidden="true"><UiIcon v-if="stage.state === 'done'" name="check" /><template v-else>{{ index + 1 }}</template></span>
-              <div>
-                <strong>{{ stage.title }}</strong>
-                <small>{{ stage.state === 'done' ? '已完成' : stage.state === 'current' ? '进行中' : '待开始' }}</small>
-              </div>
-            </li>
-          </ol>
 
           <section v-if="pendingKind" class="decision-card" aria-labelledby="decision-title">
             <UiIcon name="alert" />
@@ -74,7 +63,7 @@
           <p v-else-if="activeRun.status === 'failed'" class="ui-error" role="alert">分析未能完成。已保留任务进度，可以重新发起。</p>
 
           <article v-if="activeRun.report" class="report" aria-labelledby="report-title">
-            <h3 id="report-title">分析报告</h3>
+            <h3 id="report-title">分析结果</h3>
             <div class="report-body">
               <component v-for="(block, index) in reportBlocks" :is="block.list ? 'ul' : 'div'" :key="index">
                 <component v-for="(row, rowIndex) in block.rows" :is="row.tag" :key="rowIndex">
@@ -206,14 +195,7 @@
 <script>
 import agentService, { eventStreamUrl } from '@/utils/agent';
 import UiIcon from '@/components/UiIcon.vue';
-import { citationParts } from '@/utils/citations';
-
-const STAGES = [
-  { key: 'plan', title: '规划任务' },
-  { key: 'tools', title: '检索核验' },
-  { key: 'verify', title: '检查差异' },
-  { key: 'report', title: '生成报告' }
-];
+import { citationParts, isSourceLink } from '@/utils/citations';
 
 export default {
   name: 'AgentView',
@@ -260,25 +242,6 @@ export default {
     decisionTitle() {
       const titles = { clarification: '还需要补充信息', approval: '确认是否生成报告', paused: '从上次进度继续' };
       return this.activeRun?.interrupt?.title || titles[this.pendingKind];
-    },
-    stages() {
-      const lastPlan = [...this.events].reverse().find(item => item.kind === 'plan_ready');
-      const stepIds = lastPlan?.payload?.plan?.steps?.map(step => step.id) || [];
-      const finishedSteps = new Set(this.events
-        .filter(item => ['tool_completed', 'tool_failed'].includes(item.kind))
-        .map(item => item.payload?.stepId));
-      const verified = Boolean(this.evidenceEvent);
-      const completed = [
-        Boolean(lastPlan),
-        verified || (stepIds.length > 0 && stepIds.every(id => finishedSteps.has(id))),
-        verified,
-        Boolean(this.activeRun?.report) && this.activeRun?.status === 'completed'
-      ];
-      const firstPending = completed.indexOf(false);
-      return STAGES.map((stage, index) => ({
-        ...stage,
-        state: completed[index] ? 'done' : (this.isRunning && firstPending === index ? 'current' : 'pending')
-      }));
     },
     lastClarification() {
       return [...this.events].reverse().find(item => item.kind === 'clarification_received');
@@ -512,9 +475,7 @@ export default {
       this.selectedEvidence = item;
       this.$nextTick(() => document.getElementById('agent-evidence-' + index)?.focus());
     },
-    isSourceLink(url) {
-      return typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(url);
-    },
+    isSourceLink,
     runStatus(status) {
       return ({
         running: '分析中', waiting_clarification: '等待补充', waiting_approval: '待审批',
@@ -615,16 +576,6 @@ export default {
 .run-status.warning { background: var(--warn-bg); }
 .run-status.danger { background: var(--danger-bg); }
 
-.progress-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0 0 16px; padding: 0; list-style: none; }
-.progress-steps li { display: flex; align-items: center; gap: 6px; padding-bottom: 7px; border-bottom: 2px solid var(--line); }
-.progress-steps li.done, .progress-steps li.current { border-color: var(--accent); }
-.progress-steps strong, .progress-steps small { display: block; font-size: 12px; }
-.progress-steps small { color: var(--muted); }
-.step-marker { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font: 700 12px/1 var(--mono); }
-.step-marker .ui-icon { width: 14px; height: 14px; }
-.done .step-marker { border-color: var(--tint); background: var(--tint); color: var(--accent); }
-.current .step-marker { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
-
 .decision-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; margin-bottom: 16px; padding: 13px; border: 1px solid #e5cf9d; border-radius: var(--control-radius); background: var(--warn-bg); }
 .decision-card > .ui-icon { margin-top: 1px; color: var(--warn); }
 .action-status { color: var(--warn); font-size: 13px; font-weight: 700; }
@@ -653,7 +604,7 @@ export default {
 .report > h3 { margin-bottom: 12px; font-size: 1.23rem; }
 .report-body { max-width: 72ch; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
 .report-body h4 { margin-top: 14px; font-size: 15px; }
-.report-body p { margin-block: 5px 8px; }
+.report-body p { margin-block: 5px 8px; text-wrap: pretty; }
 .report-body ul { margin: 6px 0 10px; padding-left: 1.45em; }
 .report-body li { margin-block: 4px; }
 .report-citation { min-height: 25px; margin-inline: 2px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--tint); color: var(--accent); font: 700 12px/1.3 var(--mono); text-decoration: underline; }
@@ -692,7 +643,6 @@ export default {
   .evidence-content:not(.expanded) { display: none; }
 }
 @media (max-width: 430px) {
-  .progress-steps li { align-items: start; flex-direction: column; gap: 3px; }
   .decision-card { gap: 6px; padding-inline: 8px; }
 }
 </style>

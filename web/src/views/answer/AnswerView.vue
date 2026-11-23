@@ -33,7 +33,10 @@
               <p v-else-if="message.role === 'user'" class="message-text">{{ message.content }}</p>
               <p v-else class="message-text">
                 <template v-for="(part, partIndex) in answerParts(message)">
-                  <router-link v-if="part.fact" :key="'citation-' + partIndex" :to="evidenceLocation(part.fact)"
+                  <a v-if="part.fact && isSourceLink(part.fact.sourceUrl)" :key="'source-' + partIndex"
+                    class="citation-link" :href="part.fact.sourceUrl" target="_blank" rel="noopener noreferrer"
+                    :aria-label="'查看来源 ' + (part.fact.sourceTitle || part.fact.index)">[{{ part.fact.index }}]</a>
+                  <router-link v-else-if="part.fact" :key="'citation-' + partIndex" :to="evidenceLocation(part.fact)"
                     class="citation-link" :aria-label="'在图谱中查看第 ' + part.fact.index + ' 条依据'">[{{ part.fact.index }}]</router-link>
                   <span v-else :key="'text-' + partIndex">{{ part.text }}</span>
                 </template>
@@ -56,7 +59,7 @@
                       <b>[{{ fact.index }}]</b>
                       <span class="fact-summary">
                         <strong>{{ fact.sourceName || fact.targetName }}</strong>
-                        <em>{{ fact.factType === 'attribute' ? '属性' : relationName(fact.relation) }}</em>
+                        <em>{{ fact.sourceTitle || (fact.factType === 'attribute' ? '属性' : relationName(fact.relation)) }}</em>
                         <span>{{ fact.factType === 'attribute' ? fact.property + '：' + fact.value : fact.targetName }}</span>
                       </span>
                       <UiIcon name="arrow" />
@@ -147,7 +150,7 @@
 <script>
 import service from '@/utils/axios';
 import UiIcon from '@/components/UiIcon.vue';
-import { citationParts } from '@/utils/citations';
+import { citationParts, isSourceLink } from '@/utils/citations';
 
 function visitorId() {
   const key = 'agrireg.visitorId';
@@ -359,6 +362,7 @@ export default {
     answerParts(message) {
       return citationParts(message.content, message.evidence);
     },
+    isSourceLink,
     evidenceLocation(fact) {
       const location = this.graphLocation(fact.sourceName || fact.targetName);
       if (fact.factType === 'attribute') return location;

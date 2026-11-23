@@ -10,3 +10,7 @@ export function citationParts(value, evidence) {
     return fact ? { fact } : { text: part };
   });
 }
+
+export function isSourceLink(url) {
+  return typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(url);
+}
