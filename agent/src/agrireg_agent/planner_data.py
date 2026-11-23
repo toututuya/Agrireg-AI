@@ -56,7 +56,9 @@ class PlannerExample(BaseModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=500)]
     plan: TaskPlan
     kind: NonemptyText | None = None
+    group_id: NonemptyText | None = None
     source: NonemptyText = "labeled"
+    source_ref: NonemptyText | None = None
     documents_enabled: bool = True
     clarification_terms: list[NonemptyText] = Field(default_factory=list)
 
@@ -112,23 +114,33 @@ def _training_row(example: PlannerExample) -> dict:
     if any(term.casefold() not in missing.casefold() for term in terms):
         raise ValueError("clarification_terms must occur in the labeled missing_information.")
     plan.missing_information = missing
-    return {
+    row = {
         "id": example.id, "kind": example.kind or plan.task_type, "source": example.source,
         "question": example.question, "documents_enabled": example.documents_enabled,
         "input": planning_input(example.question, example.documents_enabled),
         "plan": plan.model_dump(mode="json"), "clarification_terms": terms,
     }
+    if example.group_id is not None:
+        row["group_id"] = example.group_id
+    if example.source_ref is not None:
+        row["source_ref"] = example.source_ref
+    return row
 
 
-def ensure_disjoint(train: list[dict], test: list[dict]) -> None:
+def ensure_disjoint(left: list[dict], right: list[dict]) -> None:
     def question_keys(rows: list[dict]) -> set[str]:
         return {"".join(unicodedata.normalize("NFKC", row["question"]).casefold().split()) for row in rows}
 
-    shared_ids = {row["id"] for row in train} & {row["id"] for row in test}
-    shared_questions = question_keys(train) & question_keys(test)
-    if shared_ids or shared_questions:
+    def group_keys(rows: list[dict]) -> set[str]:
+        return {row["group_id"] for row in rows if row.get("group_id")}
+
+    shared_ids = {row["id"] for row in left} & {row["id"] for row in right}
+    shared_questions = question_keys(left) & question_keys(right)
+    shared_groups = group_keys(left) & group_keys(right)
+    if shared_ids or shared_questions or shared_groups:
         raise ValueError(
-            f"Train and test overlap on {len(shared_ids)} IDs and {len(shared_questions)} normalized questions."
+            f"Datasets overlap on {len(shared_ids)} IDs, {len(shared_questions)} normalized questions, "
+            f"and {len(shared_groups)} case groups."
         )
 
 

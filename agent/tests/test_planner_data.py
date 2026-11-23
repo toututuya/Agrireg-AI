@@ -57,6 +57,25 @@ def test_train_test_rejects_duplicate_normalized_questions(tmp_path):
         read_dataset(write_jsonl(tmp_path / "repeat.jsonl", [row, row]))
 
 
+def test_three_way_preflight_rejects_split_variants(tmp_path, monkeypatch, capsys):
+    group_id = "same-comparison-case"
+    train = example("comparison") | {"group_id": group_id, "source_ref": "synthetic:case-a"}
+    dev = example("missing_comparison") | {"group_id": group_id}
+    train_path = write_jsonl(tmp_path / "train.jsonl", [train])
+    dev_path = write_jsonl(tmp_path / "dev.jsonl", [dev])
+    test_path = write_jsonl(tmp_path / "test.jsonl", [example("path")])
+    assert read_dataset(train_path)[0]["source_ref"] == train["source_ref"]
+    assert read_dataset(train_path)[0]["group_id"] == group_id
+    monkeypatch.setattr(sys, "argv", [
+        "planner-sft", "check-data", "--train", str(train_path), "--dev", str(dev_path), "--test", str(test_path),
+    ])
+
+    with pytest.raises(SystemExit, match="2"):
+        planner_sft.main()
+
+    assert "train/dev" in capsys.readouterr().err
+
+
 def test_export_cli_preserves_validated_assistant_plan(tmp_path, monkeypatch):
     path = write_jsonl(tmp_path / "labels.jsonl", [example("missing_path")])
     output = tmp_path / "export" / "messages.jsonl"
