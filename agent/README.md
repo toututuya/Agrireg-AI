@@ -1,6 +1,6 @@
 # AgriReg Agent Service
 
-独立 Python 服务，使用 LangGraph 编排“任务规划 → 受控图谱工具 → 外部来源核验 → 冲突检测 → 人工确认 → 报告生成”。Agent 不直接连接 Neo4j，也不能生成或执行任意 Cypher；所有图谱访问都通过现有 Spring Boot API。
+独立 Python 服务，使用 LangGraph 编排任务规划、受控工具执行、补查、证据核验、人工确认和报告生成。图谱查询复用 Spring Boot 的有界查询接口。
 
 ## Local start
 
@@ -12,7 +12,14 @@ Copy-Item .env.example .env.local
 .\.venv\Scripts\python -m uvicorn agrireg_agent.api:app --host 127.0.0.1 --port 8091
 ```
 
-`DEEPSEEK_ENABLED=false` 时仍可完整演示状态图、工具路由、暂停恢复与确定性报告；启用模型后，规划器会优先生成结构化任务计划，并基于编号证据撰写报告。API Key 只放在本地环境变量中。
+`DEEPSEEK_ENABLED=false` 时可使用确定性规划与报告。启用模型后，规划器优先生成结构化计划，服务端验证工具名与入参。报告模型选择编号证据，服务端按原文渲染引用。
+
+## 计划、执行与上下文
+
+- 比较或路径查询缺少对象时暂停追问，收到补充再规划。执行前校验工具白名单和参数，保证登记号及两实体参数来自当前请求。
+- 工具返回空证据或失败时，可追加一轮补查，最多两步。路径或比较查不到时可以改查单个实体。启用文档索引时可补查登记原文。同一工具与入参只补查一次，整次运行受工具步数上限约束。
+- 线程内最近三次已完成问题保留原文窗口，每条最多 300 字。前九次保留去重后的实体和任务类型摘要。历史只帮助解析“该产品”等指代，报告引用只使用本次运行的证据。
+- 工具事件记录响应时间。新计划直接读取图谱证据，统一在收尾阶段生成报告。旧计划仍可恢复。
 
 ## API shape
 
@@ -53,3 +60,15 @@ agrireg-documents search "登记状态" --registration-number SAMPLE-001 --mode 
 ~~~bash
 python evaluation/evaluate_documents.py /path/to/document-qrels.jsonl --limit 5
 ~~~
+
+## MCP
+
+FastMCP 暴露实体搜索、关系路径和文档检索三项工具，复用同一套检索逻辑。外部 MCP 客户端可通过 stdio 启动服务，也可以连接本机的 Streamable HTTP 端点。
+
+~~~bash
+python -m pip install -e ".[mcp]"
+agrireg-mcp
+agrireg-mcp --transport streamable-http --port 8092
+~~~
+
+HTTP 地址为 `http://127.0.0.1:8092/mcp`。配置图谱 API 或 Milvus 后，相应工具即可查询。文档工具的入参结构为 `{"request":{"query":"登记状态","limit":5}}`。

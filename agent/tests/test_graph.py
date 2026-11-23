@@ -29,13 +29,13 @@ class FakeTools:
         }
 
 
-def make_graph(tmp_path: Path):
+def make_graph(tmp_path: Path, tools=None, **options):
     settings = Settings(
         AGENT_DATA_DIR=tmp_path,
         DEEPSEEK_ENABLED=False,
         DEEPSEEK_API_KEY="",
     )
-    return build_agent_graph(FakeTools(), DeepSeekClient(settings), InMemorySaver())
+    return build_agent_graph(tools or FakeTools(), DeepSeekClient(settings), InMemorySaver(), **options)
 
 
 def test_fact_task_completes_with_numbered_evidence(tmp_path):
@@ -55,9 +55,9 @@ def test_fact_task_completes_with_numbered_evidence(tmp_path):
     assert result["status"] == "completed"
     assert result["verified_evidence"]
     assert "[1]" in result["report"]
-    assert all(item["step"]["tool"] in {
-        "search_entity", "external_substance_lookup", "grounded_answer"
-    } for item in result["tool_results"])
+    assert [item["step"]["tool"] for item in result["tool_results"]] == [
+        "search_entity", "external_substance_lookup",
+    ]
 
 
 def test_compliance_task_interrupts_and_resumes(tmp_path):
@@ -96,6 +96,39 @@ def test_missing_comparison_entity_requests_clarification(tmp_path):
     )
     assert first["__interrupt__"][0].value["kind"] == "clarification"
 
-    resumed = graph.invoke(Command(resume="'Chlorantraniliprole'"), config)
+    resumed = graph.invoke(Command(resume="Chlorantraniliprole"), config)
     assert resumed["status"] == "completed"
+
+
+def test_empty_path_replans_once_within_total_step_budget(tmp_path):
+    class EmptyPathTools(FakeTools):
+        def execute(self, name, arguments, question):
+            if name == "find_relation_path":
+                return {"tool": name, "evidence": []}
+            return super().execute(name, arguments, question)
+
+    graph = make_graph(tmp_path, tools=EmptyPathTools(), documents_enabled=True, max_tool_steps=2)
+    result = graph.invoke(
+        {"question": "查找 'Abamectin' 到 'Botrytis cinerea' 的关系路径"},
+        {"configurable": {"thread_id": "adaptive-path"}},
+    )
+
+    assert result["status"] == "completed"
+    assert [tool["step"]["tool"] for tool in result["tool_results"]] == [
+        "find_relation_path", "search_entity",
+    ]
+    assert sum(item["kind"] == "plan_updated" for item in result["events"]) == 1
+
+
+def test_no_close_of_missing_fields_without_user_response(tmp_path):
+    graph = make_graph(tmp_path)
+    config = {"configurable": {"thread_id": "missing-fields"}}
+
+    graph.invoke({"question": "比较 'Abamectin'"}, config)
+    graph.invoke(Command(resume={"value": None}), config)
+    result = graph.invoke(Command(resume=""), config)
+
+    assert result["status"] == "completed"
+    assert result["report"].startswith("# 信息待补")
+    assert not result["tool_results"]
 

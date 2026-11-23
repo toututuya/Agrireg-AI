@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .models import TaskPlan
 
 TERMINAL_STATUSES = {"completed", "failed", "rejected"}
 
@@ -162,6 +163,46 @@ class RunStore:
                 ).fetchall()
             ]
             return result
+
+    def planning_context(self, run_id: str, thread_id: str) -> dict[str, Any]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT r.question, (
+                    SELECT e.payload_json FROM agent_events e
+                    WHERE e.run_id = r.id AND e.kind = 'plan_ready'
+                    ORDER BY e.seq DESC LIMIT 1
+                ) AS planning_event
+                FROM agent_runs r
+                WHERE r.thread_id = ? AND r.id != ? AND r.status = 'completed'
+                  AND r.created_at <= (SELECT created_at FROM agent_runs WHERE id = ?)
+                ORDER BY r.created_at DESC LIMIT 12
+                """,
+                (thread_id, run_id, run_id),
+            ).fetchall()
+        if not rows:
+            return {}
+        turns = []
+        for row in rows:
+            event = json.loads(row["planning_event"] or "{}")
+            raw_plan = event.get("plan")
+            try:
+                plan = TaskPlan.model_validate(raw_plan)
+            except ValueError:
+                plan = None
+            turns.append({
+                "question": row["question"][:300],
+                "type": plan.task_type if plan else "",
+                "entities": [entity[:80] for entity in plan.entities] if plan and not plan.missing_information else [],
+            })
+        older = turns[3:]
+        return {
+            "summary": {
+                "entities": list(dict.fromkeys(entity for turn in older for entity in turn["entities"]))[:6],
+                "types": list(dict.fromkeys(turn["type"] for turn in older if turn["type"])),
+            },
+            "recent": list(reversed(turns[:3])),
+        }
 
     def update_run(self, run_id: str, status: str, **fields: Any) -> None:
         allowed = {"interrupt_json", "report", "error"}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -31,7 +30,10 @@ class AgentRuntime:
         self.checkpointer.setup()
         self.tools = tools or ControlledTools(settings)
         self.llm = llm or DeepSeekClient(settings)
-        self.graph = build_agent_graph(self.tools, self.llm, self.checkpointer)
+        self.graph = build_agent_graph(
+            self.tools, self.llm, self.checkpointer,
+            documents_enabled=bool(settings.milvus_uri), max_tool_steps=settings.max_tool_steps,
+        )
         self._tasks: set[asyncio.Task[Any]] = set()
 
     def start_run(self, run_id: str) -> None:
@@ -39,6 +41,7 @@ class AgentRuntime:
         payload = {
             "question": run["question"],
             "require_approval": run["requireApproval"],
+            "context": self.store.planning_context(run_id, run["threadId"]),
             "tool_results": [],
             "evidence": [],
             "events": [],
