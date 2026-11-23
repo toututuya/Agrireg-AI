@@ -21,8 +21,8 @@ jobs:
           distribution: temurin
           java-version: "8"
           cache: maven
-      - name: Build API
-        run: mvn --batch-mode --no-transfer-progress -DskipTests package
+      - name: Test and build API
+        run: mvn --batch-mode --no-transfer-progress verify
 
   web:
     name: Vue Web

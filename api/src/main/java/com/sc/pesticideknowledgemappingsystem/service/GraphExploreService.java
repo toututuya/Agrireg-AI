@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -46,7 +47,23 @@ public class GraphExploreService {
 
     public Map<String, Object> search(String keyword) {
         Session session = sessionFactory.openSession();
-        Long nodeId = resolveNodeId(session, keyword);
+        return graphForNode(session, resolveNodeId(session, keyword), keyword);
+    }
+
+    public Map<String, Object> searchForAnswer(String keyword) {
+        Session session = sessionFactory.openSession();
+        List<Map<String, Object>> matches = resolveNodeMatches(session, keyword, 3);
+        List<String> choices = competingNames(matches);
+        if (!choices.isEmpty()) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("found", false);
+            result.put("ambiguityChoices", choices);
+            return result;
+        }
+        return graphForNode(session, firstNodeId(matches), keyword);
+    }
+
+    private Map<String, Object> graphForNode(Session session, Long nodeId, String keyword) {
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("nodeId", nodeId == null ? -1L : nodeId);
         return executeGraphQuery(session, graphByIdCypher(), parameters, keyword);
@@ -93,6 +110,10 @@ public class GraphExploreService {
     }
 
     private Long resolveNodeId(Session session, String keyword) {
+        return firstNodeId(resolveNodeMatches(session, keyword, 1));
+    }
+
+    private List<Map<String, Object>> resolveNodeMatches(Session session, String keyword, int limit) {
         String exactCypher =
                 "CALL { " +
                 "MATCH (node:ActiveSubstance) WHERE node.normalized_name = $normalized " +
@@ -114,21 +135,39 @@ public class GraphExploreService {
                 "UNION ALL MATCH (node:ActiveSubstance) " +
                 "WHERE node.`CAS registry number` = $keyword " +
                 "RETURN id(node) AS nodeId, 1 AS matchRank " +
-                "} RETURN nodeId ORDER BY matchRank, nodeId LIMIT 1";
+                "} WITH nodeId, min(matchRank) AS matchRank " +
+                "ORDER BY matchRank, nodeId LIMIT $limit " +
+                "MATCH (candidate) WHERE id(candidate) = nodeId " +
+                "RETURN nodeId, matchRank, labels(candidate)[0] AS label, " + primaryName("candidate") +
+                " AS name ORDER BY matchRank, nodeId";
 
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("normalized", normalizeKeyword(keyword));
         parameters.put("keyword", keyword.trim());
-        Long exact = firstNodeId(session.query(exactCypher, parameters));
-        if (exact != null) return exact;
+        parameters.put("limit", limit);
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (Map<String, Object> row : session.query(exactCypher, parameters)) matches.add(row);
+        if (!matches.isEmpty()) return matches;
 
         String fallbackCypher =
                 "MATCH (node) " +
-                "WHERE " + searchableText("node") + " CONTAINS toLower($keyword) " +
+                "WHERE (" + searchableText("node") + " CONTAINS toLower($keyword) OR " + aliasMatch("node") + ") " +
                 "WITH node, " + matchRank("node", "keyword") + " AS matchRank " +
-                "ORDER BY matchRank, size(" + primaryName("node") + "), id(node) LIMIT 1 " +
-                "RETURN id(node) AS nodeId";
-        return firstNodeId(session.query(fallbackCypher, parameters));
+                "RETURN id(node) AS nodeId, matchRank, labels(node)[0] AS label, " + primaryName("node") + " AS name " +
+                "ORDER BY matchRank, size(name), nodeId LIMIT $limit";
+        for (Map<String, Object> row : session.query(fallbackCypher, parameters)) matches.add(row);
+        return matches;
+    }
+
+    static List<String> competingNames(List<Map<String, Object>> matches) {
+        if (matches.size() < 2) return Collections.emptyList();
+        Object bestRank = matches.get(0).get("matchRank");
+        List<String> names = new ArrayList<>();
+        for (Map<String, Object> match : matches) {
+            if (!Objects.equals(bestRank, match.get("matchRank"))) break;
+            names.add(match.get("name") + "（" + match.get("label") + "）");
+        }
+        return names.size() > 1 ? names : Collections.emptyList();
     }
 
     private Long firstNodeId(Iterable<Map<String, Object>> rows) {
@@ -482,7 +521,12 @@ public class GraphExploreService {
                 "WHEN toLower(coalesce(toString(" + alias + ".`Pesticide name`), '')) = " + keyword + " THEN 1 " +
                 "WHEN toLower(coalesce(toString(" + alias + ".`Active Ingredient`), '')) = " + keyword + " THEN 1 " +
                 "WHEN toLower(coalesce(toString(" + alias + ".`CAS registry number`), '')) = " + keyword + " THEN 1 " +
+                "WHEN " + aliasMatch(alias) + " THEN 1 " +
                 "WHEN toLower(" + primaryName(alias) + ") STARTS WITH " + keyword + " THEN 2 " +
                 "ELSE 3 END";
+    }
+
+    private String aliasMatch(String node) {
+        return "any(alias IN coalesce(" + node + ".aliases, []) WHERE toLower(trim(toString(alias))) = $normalized)";
     }
 }
