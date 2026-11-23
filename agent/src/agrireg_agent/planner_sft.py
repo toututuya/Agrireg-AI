@@ -161,7 +161,10 @@ class LocalQwenPlanner:
 
 def train(
     base: str, output: Path, steps: int, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+    save_steps: int | None = None,
 ) -> None:
+    if save_steps is not None and not 1 <= save_steps <= steps:
+        raise ValueError("--save-steps must be between 1 and --steps.")
     rows = read_dataset(dataset) if dataset is not None else make_dataset("train", seed)
     import torch
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -198,7 +201,8 @@ def train(
             output_dir=str(output), max_steps=steps, learning_rate=2e-4, seed=seed,
             per_device_train_batch_size=1, gradient_accumulation_steps=4, bf16=True,
             gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
-            save_strategy="no", logging_steps=5, disable_tqdm=True, report_to="none",
+            save_strategy="steps" if save_steps is not None else "no", save_steps=save_steps or 500,
+            save_only_model=True, logging_steps=5, disable_tqdm=True, report_to="none",
         ),
     )
     result = trainer.train()
@@ -339,6 +343,7 @@ def main() -> None:
     fit.add_argument("--base", default=BASE_MODEL)
     fit.add_argument("--output", type=Path, required=True)
     fit.add_argument("--steps", type=int, default=64)
+    fit.add_argument("--save-steps", type=int, help="Save a model-only checkpoint at this optimizer-step interval")
     check = commands.add_parser("evaluate")
     check.add_argument("--base", default=BASE_MODEL)
     check.add_argument("--adapter", required=True)
@@ -370,7 +375,8 @@ def main() -> None:
         elif args.command == "train":
             if args.steps < 1:
                 parser.error("--steps must be positive.")
-            train(args.base, args.output, args.steps, args.seed, args.four_bit, dataset=args.dataset)
+            train(args.base, args.output, args.steps, args.seed, args.four_bit,
+                  dataset=args.dataset, save_steps=args.save_steps)
         else:
             evaluate(args.base, args.adapter, args.output, args.seed, args.four_bit, dataset=args.dataset)
     except (ValueError, OSError) as exc:
