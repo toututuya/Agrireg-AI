@@ -3,9 +3,10 @@ from types import SimpleNamespace
 import httpx
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agrireg_agent.answering import answer_without_graph
+from agrireg_agent.answering import answer_without_graph, document_answer
 from agrireg_agent.clients import ControlledTools, DeepSeekClient
 from agrireg_agent.config import Settings
+from agrireg_agent.documents import CHUNK_LENGTH, CHUNK_OVERLAP
 from agrireg_agent.graph import build_agent_graph
 
 
@@ -77,3 +78,19 @@ def test_relationship_report_reconstructs_order_and_checks_each_link(tmp_path):
     broken = graph.invoke(question, {"configurable": {"thread_id": "broken"}})
     assert "完整路径" in broken["report"] and "Chlorantraniliprole →" not in broken["report"]
     assert broken["tool_results"][0]["outcome"] == "partial"
+
+
+def test_focused_registry_answer_restores_words_split_between_snapshot_chunks():
+    prefix = "图谱关联作物：Spring barley、Winter wheat、" + "Some variety、" * 5
+    text = "其他资料" * ((CHUNK_LENGTH - len(prefix) - 2) // 4)
+    text += "\n" + prefix
+    text = text.ljust(CHUNK_LENGTH - 1, " ") + "W"
+    first = {
+        "title": "登记记录", "summary": text,
+        "properties": {"documentId": "neo4j-register-1", "version": "v1", "section": "快照"},
+    }
+    continuation = first | {"summary": text[-CHUNK_OVERLAP:] + "inter oats\n其他字段：其他资料"}
+    joined = document_answer("登记作物是什么", "00A657-62", [first, continuation])
+    assert "Winter oats" in joined["answer"] and " W [1]" not in joined["answer"]
+    trimmed = document_answer("登记作物是什么", "00A657-62", [first])
+    assert "Some variety… [1]" in trimmed["answer"] and " W [1]" not in trimmed["answer"]

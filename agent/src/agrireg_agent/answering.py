@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from .clients import ControlledTools
+from .documents import CHUNK_LENGTH, CHUNK_OVERLAP
 from .models import PlanStep
 from .planner import (
     COMPLIANCE_TERMS, DOCUMENT_CONTENT, HYPHENATED_REGISTRATION, REGISTRATION, REGISTRATION_FIELD,
@@ -103,6 +104,27 @@ def answer_payload(answer: str, mode: str, model: str = "") -> dict[str, Any]:
     return {"answer": answer, "mode": mode, "model": model, "grounded": False, "evidence": [], "followUps": []}
 
 
+def join_snapshot_chunks(hit: dict[str, Any], hits: list[dict[str, Any]]) -> tuple[str, bool]:
+    metadata = hit.get("properties", {})
+    parts = {
+        candidate["summary"] for candidate in hits if all(
+            candidate.get("properties", {}).get(key) == metadata.get(key)
+            for key in ("documentId", "version", "section", "page")
+        )
+    }
+    tail = content = hit["summary"]
+    parts.discard(tail)
+    while len(tail) >= CHUNK_OVERLAP:
+        overlap = tail[-CHUNK_OVERLAP:]
+        continuations = [part for part in parts if part.startswith(overlap) and len(part) > CHUNK_OVERLAP]
+        if len(continuations) != 1:
+            break
+        tail = continuations[0]
+        content += tail[CHUNK_OVERLAP:]
+        parts.remove(tail)
+    return content, len(tail) >= CHUNK_LENGTH
+
+
 def document_answer(question: str, registration: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
     evidence = []
     selected = hits[:2]
@@ -116,12 +138,18 @@ def document_answer(question: str, registration: str, hits: list[dict[str, Any]]
     fields = {field for field, trigger in SNAPSHOT_FIELDS.items() if re.search(trigger, question)}
     shown_fields: set[str] = set()
     for index, (hit, snapshot) in enumerate(zip(selected, snapshots), 1):
-        raw = unescape(hit["summary"])
-        focused = [
-            line for line in raw.splitlines() if line.partition("：")[0] in fields and line not in shown_fields
-        ] if snapshot else []
-        shown_fields.update(focused)
-        excerpt = "。".join(focused) if focused else " ".join(raw.split())
+        raw, truncated = join_snapshot_chunks(hit, hits) if snapshot and fields else (hit["summary"], False)
+        source_lines = unescape(raw).splitlines()
+        focused = []
+        for line_number, line in enumerate(source_lines):
+            field = line.partition("：")[0]
+            if not snapshot or field not in fields or field in shown_fields:
+                continue
+            shown_fields.add(field)
+            if truncated and line_number == len(source_lines) - 1:
+                line = (line.rpartition("、")[0] or line) + "…"
+            focused.append(line)
+        excerpt = "。".join(focused) if focused else " ".join(unescape(hit["summary"]).split())
         text = excerpt[:420].rstrip() + ("…" if len(excerpt) > 420 else "")
         title = hit.get("title") or "登记资料"
         if focused or not snapshot or not fields:
