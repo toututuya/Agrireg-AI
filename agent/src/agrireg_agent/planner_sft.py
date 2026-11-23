@@ -5,6 +5,7 @@ import json
 import logging
 import math
 from collections import Counter
+from collections.abc import Iterable
 from functools import cached_property
 from pathlib import Path
 from statistics import median
@@ -14,7 +15,13 @@ from typing import Any
 
 from .models import TaskPlan
 from .planner import PLANNER_SYSTEM, parse_plan
-from .planner_data import make_dataset
+from .planner_data import (
+    dataset_fingerprint,
+    default_clarification_terms,
+    ensure_disjoint,
+    make_dataset,
+    read_dataset,
+)
 
 
 BASE_MODEL = "Qwen/Qwen3-1.7B"
@@ -32,11 +39,37 @@ def _prompt(tokenizer, system: str, user: str) -> list[int]:
 
 def training_sequence(tokenizer, row: dict) -> dict[str, list[int]]:
     prefix = _prompt(tokenizer, PLANNER_SYSTEM, row["input"])
-    answer = json.dumps(row["plan"], ensure_ascii=False, separators=(",", ":")) + tokenizer.eos_token
+    answer = _plan_text(row) + tokenizer.eos_token
     target = tokenizer.encode(answer, add_special_tokens=False)
     if len(prefix) + len(target) > MAX_SEQUENCE:
         raise ValueError(f"Training row {row['id']} exceeds {MAX_SEQUENCE} tokens.")
     return {"input_ids": prefix + target, "labels": [-100] * len(prefix) + target}
+
+
+def _plan_text(row: dict) -> str:
+    return json.dumps(row["plan"], ensure_ascii=False, separators=(",", ":"))
+
+
+def _write_jsonl(output: Path, rows: Iterable[dict]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _export_messages(dataset: Path, output: Path) -> None:
+    if dataset.resolve() == output.resolve():
+        raise ValueError("Use a different output path to preserve the labeled dataset.")
+    rows = read_dataset(dataset)
+    _write_jsonl(output, (
+        {"messages": [
+            {"role": "system", "content": PLANNER_SYSTEM},
+            {"role": "user", "content": row["input"]},
+            {"role": "assistant", "content": _plan_text(row)},
+        ]}
+        for row in rows
+    ))
+    print(f"Exported {len(rows)} planning examples.")
 
 
 def _load_model(base: str, device: str, adapter: str = "", four_bit: bool = False) -> tuple:
@@ -124,7 +157,10 @@ class LocalQwenPlanner:
             return None
 
 
-def train(base: str, output: Path, steps: int, seed: int, four_bit: bool = False) -> None:
+def train(
+    base: str, output: Path, steps: int, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+) -> None:
+    rows = read_dataset(dataset) if dataset is not None else make_dataset("train", seed)
     import torch
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from torch.nn.utils.rnn import pad_sequence
@@ -143,8 +179,7 @@ def train(base: str, output: Path, steps: int, seed: int, four_bit: bool = False
         r=8, lora_alpha=16, lora_dropout=0.05, task_type="CAUSAL_LM",
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
     ))
-    rows = make_dataset("train", seed)
-    dataset = [training_sequence(tokenizer, row) for row in rows]
+    training_rows = [training_sequence(tokenizer, row) for row in rows]
 
     def collate(examples):
         inputs = [torch.tensor(item["input_ids"]) for item in examples]
@@ -156,7 +191,7 @@ def train(base: str, output: Path, steps: int, seed: int, four_bit: bool = False
         }
 
     trainer = Trainer(
-        model=model, train_dataset=dataset, data_collator=collate,
+        model=model, train_dataset=training_rows, data_collator=collate,
         args=TrainingArguments(
             output_dir=str(output), max_steps=steps, learning_rate=2e-4, seed=seed,
             per_device_train_batch_size=1, gradient_accumulation_steps=4, bf16=True,
@@ -168,6 +203,7 @@ def train(base: str, output: Path, steps: int, seed: int, four_bit: bool = False
     model.save_pretrained(output, safe_serialization=True)
     summary = {
         "base": base, "seed": seed, "four_bit": four_bit, "rows": len(rows), "optimizer_steps": result.global_step,
+        "dataset_sha256": dataset_fingerprint(rows),
         "loss": result.training_loss, "peak_allocated_mib": round(torch.cuda.max_memory_allocated() / 2**20),
         "seconds": result.metrics["train_runtime"],
     }
@@ -203,7 +239,7 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
     for row in rows:
         decoded = _decode_json(texts[row["id"]])
         expected = TaskPlan.model_validate(row["plan"])
-        predicted = parse_plan(decoded, row["question"], documents_enabled=True)
+        predicted = parse_plan(decoded, row["question"], documents_enabled=row.get("documents_enabled", True))
         scope = by_kind.setdefault(row["kind"], Counter())
         scope["cases"] += 1
         totals["json"] += decoded is not None
@@ -221,9 +257,10 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
         if decision and tools:
             totals["intent_and_tool"] += 1
         if decision and tools and _actions(predicted) == _actions(expected):
-            missing = expected.missing_information
-            field = "比较对象" if "比较" in missing else "起点" if "起点" in missing else "终点"
-            if not missing or field in predicted.missing_information:
+            terms = row.get("clarification_terms")
+            if terms is None:
+                terms = default_clarification_terms(expected.missing_information)
+            if all(term.casefold() in predicted.missing_information.casefold() for term in terms):
                 totals["exact_actions"] += 1
                 scope["exact_actions"] += 1
     return {
@@ -235,17 +272,22 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
     }
 
 
-def evaluate(base: str, adapter: str, output: Path, seed: int, four_bit: bool = False) -> None:
+def evaluate(
+    base: str, adapter: str, output: Path, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+) -> None:
+    rows = read_dataset(dataset) if dataset is not None else make_dataset("test", seed)
+    if dataset is not None and dataset.resolve() == output.resolve():
+        raise ValueError("Use a different output path to preserve the labeled dataset.")
     tokenizer, model = _load_model(base, "cuda", adapter, four_bit)
     model.eval()
-    rows = make_dataset("test", seed)
     print(f"Evaluating base model on {len(rows)} held-out cases.", flush=True)
     with model.disable_adapter():
         baseline = _measure(tokenizer, model, rows)
     print(f"Evaluating LoRA adapter on the same {len(rows)} cases.", flush=True)
     tuned = _measure(tokenizer, model, rows)
     results = {
-        "data": "synthetic_entity_and_template_holdout", "seed": seed, "four_bit": four_bit, "decoding": "greedy",
+        "data": "labeled_jsonl" if dataset is not None else "synthetic_entity_and_template_holdout",
+        "dataset_sha256": dataset_fingerprint(rows), "seed": seed, "four_bit": four_bit, "decoding": "greedy",
         "baseline": baseline, "lora": tuned,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -266,25 +308,56 @@ def main() -> None:
     check.add_argument("--base", default=BASE_MODEL)
     check.add_argument("--adapter", required=True)
     check.add_argument("--output", type=Path, required=True)
+    preflight = commands.add_parser("check-data", help="Validate labels and look for exact train/test leakage")
+    preflight.add_argument("--train", type=Path, required=True)
+    preflight.add_argument("--test", type=Path, required=True)
+    preflight.add_argument("--base", help="Optionally validate token lengths with an existing Qwen3 tokenizer")
+    export = commands.add_parser("export-messages", help="Export labeled examples to messages JSONL")
+    export.add_argument("--dataset", type=Path, required=True)
+    export.add_argument("--output", type=Path, required=True)
     for command in (data, fit, check):
         command.add_argument("--seed", type=int, default=42)
     for command in (fit, check):
         command.add_argument("--four-bit", action="store_true")
+        command.add_argument("--dataset", type=Path, help="Use a labeled JSONL file")
     args = parser.parse_args()
-    if args.command == "data":
-        args.output.mkdir(parents=True, exist_ok=True)
-        for split in ("train", "test"):
-            rows = make_dataset(split, args.seed)
-            with (args.output / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
-                for row in rows:
-                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            print(f"{split}: {len(rows)}")
-    elif args.command == "train":
-        if args.steps < 1:
-            parser.error("--steps must be positive.")
-        train(args.base, args.output, args.steps, args.seed, args.four_bit)
-    else:
-        evaluate(args.base, args.adapter, args.output, args.seed, args.four_bit)
+    try:
+        if args.command == "data":
+            for split in ("train", "test"):
+                rows = make_dataset(split, args.seed)
+                _write_jsonl(args.output / f"{split}.jsonl", rows)
+                print(f"{split}: {len(rows)}")
+        elif args.command == "check-data":
+            _check_data(args.train, args.test, args.base)
+        elif args.command == "export-messages":
+            _export_messages(args.dataset, args.output)
+        elif args.command == "train":
+            if args.steps < 1:
+                parser.error("--steps must be positive.")
+            train(args.base, args.output, args.steps, args.seed, args.four_bit, dataset=args.dataset)
+        else:
+            evaluate(args.base, args.adapter, args.output, args.seed, args.four_bit, dataset=args.dataset)
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
+
+
+def _check_data(train_path: Path, test_path: Path, base: str | None) -> None:
+    train_rows = read_dataset(train_path)
+    test_rows = read_dataset(test_path)
+    ensure_disjoint(train_rows, test_rows)
+    if base:
+        try:
+            from transformers import AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(base)
+            for row in train_rows + test_rows:
+                training_sequence(tokenizer, row)
+        except ImportError as exc:
+            raise ValueError('Install the tokenizer extra with pip install -e ".[tokenizer]".') from exc
+    print(json.dumps({
+        "train": len(train_rows), "test": len(test_rows), "tokenizer_checked": bool(base),
+        "train_sha256": dataset_fingerprint(train_rows), "test_sha256": dataset_fingerprint(test_rows),
+    }, indent=2))
 
 
 if __name__ == "__main__":
