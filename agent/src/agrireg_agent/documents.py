@@ -123,6 +123,14 @@ class MilvusDocumentSearch:
         self.settings = settings
         self.collection = settings.milvus_collection
         self.timeout = settings.request_timeout_seconds
+        self._load_lock = Lock()
+        self._loaded = False
+
+    def _ensure_loaded(self) -> None:
+        with self._load_lock:
+            if not self._loaded:
+                self.client.load_collection(self.collection, timeout=self.timeout)
+                self._loaded = True
 
     def encode(self, texts: list[str]):
         with _model_lock:
@@ -133,7 +141,7 @@ class MilvusDocumentSearch:
         from pymilvus import DataType, Function, FunctionType, MilvusClient
 
         if self.client.has_collection(self.collection, timeout=self.timeout):
-            self.client.load_collection(self.collection, timeout=self.timeout)
+            self._ensure_loaded()
             return
         schema = MilvusClient.create_schema(auto_id=False)
         schema.add_field("chunk_id", DataType.VARCHAR, max_length=64, is_primary=True)
@@ -160,6 +168,7 @@ class MilvusDocumentSearch:
             collection_name=self.collection, schema=schema, index_params=indexes,
             consistency_level="Bounded", timeout=self.timeout,
         )
+        self._ensure_loaded()
 
     def ingest(self, chunks: Iterator[DocumentChunk]) -> int:
         self.prepare_collection()
@@ -181,6 +190,7 @@ class MilvusDocumentSearch:
     def search(self, request: DocumentSearchRequest) -> list[DocumentHit]:
         from pymilvus import AnnSearchRequest, RRFRanker
 
+        self._ensure_loaded()
         query = request.query
         mode = request.mode
         if request.registration_number:
