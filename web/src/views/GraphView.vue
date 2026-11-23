@@ -1022,15 +1022,8 @@ export default {
   watch: {
     '$route.query': {
       deep: true,
-      async handler(query) {
-        if (!query.q) return;
-        const keyword = String(query.q);
-        if (keyword !== this.keyword || this.mode !== 'entity' || !this.graphData.found) {
-          this.switchMode('entity');
-          this.keyword = keyword;
-          await this.fetchGraph('/api/graph/search', { keyword });
-        }
-        if (query === this.$route.query) await this.applyEvidenceFromRoute();
+      handler(query) {
+        this.loadGraphRoute(query);
       }
     },
     selectedNode() {
@@ -1047,10 +1040,8 @@ export default {
     document.title = '知识图谱 · AgriReg AI';
     window.addEventListener('resize', this.handleCanvasResize);
     document.addEventListener('fullscreenchange', this.handleFullscreenChange);
-    if (this.$route.query.q) this.keyword = String(this.$route.query.q);
     this.loadGraphStats();
-    await this.searchGraph();
-    await this.applyEvidenceFromRoute();
+    if (!await this.loadGraphRoute(this.$route.query)) await this.searchGraph();
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.handleCanvasResize);
@@ -1059,6 +1050,29 @@ export default {
     if (this.statusTimer) window.clearTimeout(this.statusTimer);
   },
   methods: {
+    async loadGraphRoute(query) {
+      const { pathStart, pathEnd } = query;
+      if (typeof pathStart === 'string' && pathStart.trim() && pathStart.length <= 80
+          && typeof pathEnd === 'string' && pathEnd.trim() && pathEnd.length <= 80) {
+        if (this.mode !== 'path' || pathStart !== this.pathStart || pathEnd !== this.pathEnd || !this.graphData.found) {
+          this.switchMode('path');
+          this.pathStart = pathStart;
+          this.pathEnd = pathEnd;
+          this.clearEvidenceHighlight(false);
+          await this.fetchGraph('/api/graph/path', { source: pathStart, target: pathEnd });
+        }
+        return true;
+      }
+      if (!query.q) return false;
+      const keyword = String(query.q);
+      if (keyword !== this.keyword || this.mode !== 'entity' || !this.graphData.found) {
+        this.switchMode('entity');
+        this.keyword = keyword;
+        await this.fetchGraph('/api/graph/search', { keyword });
+      }
+      if (query === this.$route.query) await this.applyEvidenceFromRoute();
+      return true;
+    },
     switchMode(nextMode) {
       if (this.mode === nextMode) return;
       this.mode = nextMode;

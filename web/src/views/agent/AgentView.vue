@@ -64,6 +64,15 @@
 
           <article v-if="activeRun.report" class="report" aria-labelledby="report-title">
             <h3 id="report-title">分析结果</h3>
+            <AgentRelationPath v-for="(path, index) in relationPaths" :key="activeRun.id + '-path-' + index"
+              :path="path" :evidence="evidence" @inspect-evidence="inspectPathEvidence" />
+            <ul v-if="legacyPathLinks.length" class="legacy-paths" aria-label="历史关系路径">
+              <li v-for="path in legacyPathLinks" :key="path.id">
+                <router-link :to="{ name: 'graph', query: { pathStart: path.source, pathEnd: path.target } }" class="ui-link">
+                  在图谱中复查 {{ path.source }} 到 {{ path.target }} <UiIcon name="arrow" />
+                </router-link>
+              </li>
+            </ul>
             <div class="report-body">
               <component v-for="(block, index) in reportBlocks" :is="block.list ? 'ul' : 'div'" :key="index">
                 <component v-for="(row, rowIndex) in block.rows" :is="row.tag" :key="rowIndex">
@@ -196,10 +205,11 @@
 import agentService, { eventStreamUrl } from '@/utils/agent';
 import UiIcon from '@/components/UiIcon.vue';
 import { citationParts, isSourceLink } from '@/utils/citations';
+import AgentRelationPath from './AgentRelationPath.vue';
 
 export default {
   name: 'AgentView',
-  components: { UiIcon },
+  components: { UiIcon, AgentRelationPath },
   data() {
     return {
       threads: [],
@@ -259,6 +269,32 @@ export default {
     },
     visibleEvidence() {
       return this.evidenceExpanded ? this.evidence : this.evidence.slice(0, 8);
+    },
+    relationPaths() {
+      if (this.activeRun?.status !== 'completed') return [];
+      const result = [...this.events].reverse().find(item => item.runId === this.activeRun.id && item.kind === 'report_ready');
+      const paths = result?.payload?.relationPaths;
+      return Array.isArray(paths) ? paths.filter(path => Array.isArray(path.nodes) && path.nodes.length >= 2
+        && Array.isArray(path.links) && path.links.length === path.nodes.length - 1) : [];
+    },
+    legacyPathLinks() {
+      if (this.activeRun?.status !== 'completed' || this.relationPaths.length) return [];
+      const events = this.events.filter(item => item.runId === this.activeRun.id);
+      const steps = new Map();
+      for (const item of events) {
+        if (item.kind !== 'plan_ready') continue;
+        for (const step of item.payload?.plan?.steps || []) {
+          if (step.tool === 'find_relation_path') steps.set(step.id, step.arguments);
+        }
+      }
+      const matched = new Map();
+      for (const item of events) {
+        const payload = item.payload;
+        if (item.kind !== 'tool_completed' || payload?.tool !== 'find_relation_path' || payload.outcome !== 'ok') continue;
+        const args = steps.get(payload.stepId);
+        if (args?.source && args?.target) matched.set(payload.stepId, { id: payload.stepId, ...args });
+      }
+      return [...matched.values()];
     },
     reportBlocks() {
       const lines = String(this.activeRun?.report || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -475,6 +511,9 @@ export default {
       this.selectedEvidence = item;
       this.$nextTick(() => document.getElementById('agent-evidence-' + index)?.focus());
     },
+    inspectPathEvidence(index) {
+      this.focusEvidence(this.evidence.find(item => item.index === index));
+    },
     isSourceLink,
     runStatus(status) {
       return ({
@@ -602,6 +641,7 @@ export default {
 
 .report { padding-top: 11px; border-top: 1px solid var(--line); }
 .report > h3 { margin-bottom: 12px; font-size: 1.23rem; }
+.legacy-paths { margin: 0 0 10px; padding: 0; font-size: 13px; list-style: none; overflow-wrap: anywhere; }
 .report-body { max-width: 72ch; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
 .report-body h4 { margin-top: 14px; font-size: 15px; }
 .report-body p { margin-block: 5px 8px; text-wrap: pretty; }
