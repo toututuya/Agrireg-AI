@@ -1,4 +1,4 @@
-from agrireg_agent.planner import fallback_plan, parse_plan, plan_explicit_missing_registration
+from agrireg_agent.planner import build_plan, fallback_plan, parse_plan, plan_explicit_missing_registration
 from agrireg_agent.task_queue import CLARIFICATION_SEPARATOR
 
 
@@ -50,4 +50,21 @@ def test_missing_registration_accepts_real_migration_number_and_ignores_examples
         assert resumed.steps[0].arguments["registration_number"] == "00A657-62"
     example = plan_explicit_missing_registration(f"{question}{CLARIFICATION_SEPARATOR}证号 4387-901 是示例。", False)
     assert example and example.missing_information and not example.steps
+
+
+def test_planner_binds_a_single_requested_document_number():
+    class OmitsFilter:
+        def json_completion(self, _system, _user):
+            return {
+                "task_type": "fact_check", "summary": "查登记资料",
+                "steps": [{"id": "docs", "tool": "search_documents", "title": "登记资料",
+                           "arguments": {"query": "Dagda 登记资料"}}],
+            }
+
+    exact = build_plan("在登记资料里核对一下 00A657-62，定位这个编号的文档。", False, OmitsFilter(), True)
+    assert exact.steps[0].arguments["registration_number"] == "00A657-62"
+    optional = build_plan("关键词检索 Dagda 的登记资料，无需按证号 00A657-62 筛。", False, OmitsFilter(), True)
+    assert "registration_number" not in optional.steps[0].arguments
+    pair = build_plan("查登记资料里 00A657-62 和 4387-901 的两条记录。", False, OmitsFilter(), True)
+    assert "registration_number" not in pair.steps[0].arguments
 

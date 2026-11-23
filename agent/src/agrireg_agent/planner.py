@@ -37,6 +37,7 @@ MIGRATION_REGISTRATION = r"(?:\d{2}[A-Z0-9]\d{3}-\d{2}|\d{4}(?:-\d{1,3})?)"
 NAMED_MIGRATION_REGISTRATION = re.compile(
     rf"{REGISTRATION_FIELD}\s*(?:为|是|[：:])?\s*[“\"']?({MIGRATION_REGISTRATION})(?![A-Z0-9-])", re.I,
 )
+HYPHENATED_REGISTRATION = re.compile(r"(?<![A-Z0-9-])(?:\d{2}[A-Z0-9]\d{3}-\d{2}|\d{4}-\d{3})(?![A-Z0-9-])", re.I)
 DOCUMENT_CONTENT = re.compile(r"原文|文件|文档|附件|材料|资料|标签|说明书")
 EXACT_REGISTRATION_REQUEST = re.compile(
     rf"精[确准]|按(?:实际|目标|具体)?{REGISTRATION_FIELD}|(?:实际|目标|具体)(?:的)?{REGISTRATION_FIELD}|一张(?:登记)?证"
@@ -48,6 +49,7 @@ MISSING_REGISTRATION_FIELD = re.compile(
 )
 OPTIONAL_REGISTRATION_FIELD = re.compile(rf"(?:不[用按限]|无需|无须)(?:按|使用|限定)?{REGISTRATION_FIELD}")
 ILLUSTRATIVE_REGISTRATION = re.compile(r"示例|举例|例如|比如|仅供参考|例子|演示格式")
+EXCLUDED_REGISTRATION = re.compile(r"(?:排除|忽略|跳过|不查|除去|剔除)\s*(?:(?:登记(?:证)?号|证号)\s*)?[“\"']?[A-Z0-9]", re.I)
 
 
 class PlannerModel(Protocol):
@@ -117,6 +119,11 @@ def build_plan(
     plan = parse_plan(candidate, question, documents_enabled)
     if plan is None:
         return fallback_plan(question, require_approval, documents_enabled)
+    registration = requested_document_registration(question) if documents_enabled else ""
+    if registration:
+        for step in plan.steps:
+            if step.tool == "search_documents":
+                step.arguments["registration_number"] = registration
     plan.requires_approval = plan.requires_approval or require_approval or needs_human_approval(question, plan)
     return plan
 
@@ -239,9 +246,21 @@ def registration_value(question: str) -> str:
     return named.group(1).upper() if named else ""
 
 
+def requested_document_registration(question: str) -> str:
+    if (
+        OPTIONAL_REGISTRATION_FIELD.search(question) or ILLUSTRATIVE_REGISTRATION.search(question)
+        or EXCLUDED_REGISTRATION.search(question)
+    ):
+        return ""
+    text = question.upper()
+    matches = _unique(REGISTRATION.findall(text) + HYPHENATED_REGISTRATION.findall(text)
+                      + NAMED_MIGRATION_REGISTRATION.findall(text))
+    return matches[0] if len(matches) == 1 else ""
+
+
 def document_step(question: str) -> PlanStep:
-    registration = registration_value(question)
     arguments = {"query": question[:512]}
+    registration = requested_document_registration(question)
     if registration:
         arguments["registration_number"] = registration
     return PlanStep(id="documents", title="检索登记资料", tool="search_documents", arguments=arguments)

@@ -111,7 +111,7 @@ class ControlledTools:
         ]
         return {
             "tool": "search_documents",
-            "summary": f"找到 {len(hits)} 段登记文档原文。",
+            "summary": f"找到 {len(hits)} 段登记资料。",
             "evidence": evidence,
         }
 
