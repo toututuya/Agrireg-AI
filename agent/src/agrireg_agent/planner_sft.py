@@ -4,9 +4,11 @@ import argparse
 import json
 import logging
 import math
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from functools import cached_property
+from itertools import combinations
 from pathlib import Path
 from statistics import median
 from threading import Lock
@@ -211,14 +213,21 @@ def train(
     print(json.dumps(summary, indent=2))
 
 
-def _actions(plan: TaskPlan) -> list[tuple[str, dict]]:
-    return [(step.tool, {key: value.casefold() for key, value in step.arguments.items()}) for step in plan.steps]
+def _actions(plan: TaskPlan, *, include_document_query: bool = True) -> list[tuple[str, dict]]:
+    actions = []
+    for step in plan.steps:
+        arguments = {key: value.casefold() for key, value in step.arguments.items()}
+        if step.tool == "search_documents" and not include_document_query:
+            arguments.pop("query", None)
+            registration = arguments.pop("registration_number", "")
+            if registration:
+                arguments["registration_number"] = unicodedata.normalize("NFKC", registration)
+        actions.append((step.tool, arguments))
+    return actions
 
 
 def _measure(tokenizer, model, rows: list[dict]) -> dict:
-    totals = Counter()
     latencies = []
-    by_kind: dict[str, Counter] = {}
     first_per_kind = {}
     for row in rows:
         first_per_kind.setdefault(row["kind"], row["id"])
@@ -236,10 +245,29 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
         batch = remaining[start:start + 4]
         generations = _generate_batch(tokenizer, model, PLANNER_SYSTEM, [row["input"] for row in batch])
         texts.update((row["id"], text) for row, text in zip(batch, generations, strict=True))
+    return _score_plans(rows, texts) | {
+        "latency_cases": len(latencies),
+        "p50_ms": round(median(latencies)), "p95_ms": round(sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1]),
+    }
+
+
+def _score_plans(rows: list[dict], texts: dict[str, str]) -> dict:
+    totals = Counter()
+    by_kind: dict[str, Counter] = {}
+    missing_params = {"cases": 0, "proposed_call": 0, "matched_clarification_without_call": 0}
+    ready = {"cases": 0, "unnecessary_clarification": 0, "matched_critical_actions": 0}
     for row in rows:
         decoded = _decode_json(texts[row["id"]])
         expected = TaskPlan.model_validate(row["plan"])
         predicted = parse_plan(decoded, row["question"], documents_enabled=row.get("documents_enabled", True))
+        needs_clarification = bool(expected.missing_information.strip())
+        proposed_steps = (decoded or {}).get("steps")
+        proposed_call = isinstance(proposed_steps, list) and bool(proposed_steps)
+        if needs_clarification:
+            missing_params["cases"] += 1
+            missing_params["proposed_call"] += proposed_call
+        else:
+            ready["cases"] += 1
         scope = by_kind.setdefault(row["kind"], Counter())
         scope["cases"] += 1
         totals["json"] += decoded is not None
@@ -248,26 +276,33 @@ def _measure(tokenizer, model, rows: list[dict]) -> dict:
         totals["valid"] += 1
         clarify = bool(predicted.missing_information.strip())
         scope["clarified"] += clarify
+        ready["unnecessary_clarification"] += clarify and not needs_clarification
         decision = (
             predicted.task_type == expected.task_type
             and predicted.requires_approval == expected.requires_approval
-            and clarify == bool(expected.missing_information)
+            and clarify == needs_clarification
         )
         tools = [step.tool for step in predicted.steps] == [step.tool for step in expected.steps]
-        if decision and tools:
-            totals["intent_and_tool"] += 1
-        if decision and tools and _actions(predicted) == _actions(expected):
-            terms = row.get("clarification_terms")
-            if terms is None:
-                terms = default_clarification_terms(expected.missing_information)
-            if all(term.casefold() in predicted.missing_information.casefold() for term in terms):
-                totals["exact_actions"] += 1
-                scope["exact_actions"] += 1
+        if not (decision and tools):
+            continue
+        totals["intent_and_tool"] += 1
+        terms = row.get("clarification_terms")
+        if terms is None:
+            terms = default_clarification_terms(expected.missing_information)
+        matches_terms = all(term.casefold() in predicted.missing_information.casefold() for term in terms)
+        if matches_terms and _actions(predicted) == _actions(expected):
+            totals["exact_actions"] += 1
+            scope["exact_actions"] += 1
+        if needs_clarification:
+            missing_params["matched_clarification_without_call"] += matches_terms and not proposed_call
+        else:
+            ready["matched_critical_actions"] += (
+                _actions(predicted, include_document_query=False) == _actions(expected, include_document_query=False)
+            )
     return {
         "cases": len(rows), "json": totals["json"], "valid": totals["valid"],
         "intent_and_tool": totals["intent_and_tool"], "exact_actions": totals["exact_actions"],
-        "latency_cases": len(latencies),
-        "p50_ms": round(median(latencies)), "p95_ms": round(sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1]),
+        "decision_checks": {"missing_parameters": missing_params, "ready": ready},
         "by_intent": {kind: dict(counts) for kind, counts in by_kind.items()},
     }
 
@@ -308,8 +343,9 @@ def main() -> None:
     check.add_argument("--base", default=BASE_MODEL)
     check.add_argument("--adapter", required=True)
     check.add_argument("--output", type=Path, required=True)
-    preflight = commands.add_parser("check-data", help="Validate labels and look for exact train/test leakage")
+    preflight = commands.add_parser("check-data", help="Validate labels and check overlap across data splits")
     preflight.add_argument("--train", type=Path, required=True)
+    preflight.add_argument("--dev", type=Path)
     preflight.add_argument("--test", type=Path, required=True)
     preflight.add_argument("--base", help="Optionally validate token lengths with an existing Qwen3 tokenizer")
     export = commands.add_parser("export-messages", help="Export labeled examples to messages JSONL")
@@ -328,7 +364,7 @@ def main() -> None:
                 _write_jsonl(args.output / f"{split}.jsonl", rows)
                 print(f"{split}: {len(rows)}")
         elif args.command == "check-data":
-            _check_data(args.train, args.test, args.base)
+            _check_data(args.train, args.test, args.base, dev_path=args.dev)
         elif args.command == "export-messages":
             _export_messages(args.dataset, args.output)
         elif args.command == "train":
@@ -341,22 +377,29 @@ def main() -> None:
         parser.error(str(exc))
 
 
-def _check_data(train_path: Path, test_path: Path, base: str | None) -> None:
-    train_rows = read_dataset(train_path)
-    test_rows = read_dataset(test_path)
-    ensure_disjoint(train_rows, test_rows)
+def _check_data(train_path: Path, test_path: Path, base: str | None, *, dev_path: Path | None = None) -> None:
+    splits = {"train": read_dataset(train_path), "test": read_dataset(test_path)}
+    if dev_path is not None:
+        splits["dev"] = read_dataset(dev_path)
+    for (left_name, left), (right_name, right) in combinations(splits.items(), 2):
+        try:
+            ensure_disjoint(left, right)
+        except ValueError as exc:
+            raise ValueError(f"{left_name}/{right_name}: {exc}") from exc
     if base:
         try:
             from transformers import AutoTokenizer
 
             tokenizer = AutoTokenizer.from_pretrained(base)
-            for row in train_rows + test_rows:
-                training_sequence(tokenizer, row)
+            for rows in splits.values():
+                for row in rows:
+                    training_sequence(tokenizer, row)
         except ImportError as exc:
             raise ValueError('Install the tokenizer extra with pip install -e ".[tokenizer]".') from exc
     print(json.dumps({
-        "train": len(train_rows), "test": len(test_rows), "tokenizer_checked": bool(base),
-        "train_sha256": dataset_fingerprint(train_rows), "test_sha256": dataset_fingerprint(test_rows),
+        **{name: len(rows) for name, rows in splits.items()},
+        "tokenizer_checked": bool(base),
+        **{f"{name}_sha256": dataset_fingerprint(rows) for name, rows in splits.items()},
     }, indent=2))
 
 

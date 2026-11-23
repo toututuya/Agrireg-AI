@@ -4,7 +4,7 @@ from agrireg_agent import planner_sft
 from agrireg_agent.models import TaskPlan
 from agrireg_agent.planner import parse_plan
 from agrireg_agent.planner_data import make_dataset
-from agrireg_agent.planner_sft import LocalQwenPlanner, training_sequence
+from agrireg_agent.planner_sft import LocalQwenPlanner, _score_plans, training_sequence
 
 
 def test_sft_data_has_entity_holdout_and_valid_targets():
@@ -57,3 +57,27 @@ def test_heldout_metrics_use_latency_sample_count(monkeypatch):
     assert result["exact_actions"] == result["cases"] == 42
     assert result["latency_cases"] == 7
     assert 0 <= result["p50_ms"] <= result["p95_ms"]
+
+
+def test_decision_checks_score_raw_calls_and_document_parameters_separately():
+    source = make_dataset("test")
+    document = next(row for row in source if row["kind"] == "document")
+    ready = next(row for row in source if row["kind"] == "graph")
+    missing, correct_ask = [row for row in source if row["kind"] == "missing_comparison"][:2]
+    rows = [document, ready, missing, correct_ask]
+    doc_args = document["plan"]["steps"][0]["arguments"] | {"query": "定位登记原文"}
+    doc_step = document["plan"]["steps"][0] | {"arguments": doc_args}
+    texts = {
+        document["id"]: json.dumps(document["plan"] | {"steps": [doc_step]}),
+        ready["id"]: json.dumps(ready["plan"] | {"steps": [], "missing_information": "请补充成分。"}),
+        missing["id"]: json.dumps(missing["plan"] | {"steps": ready["plan"]["steps"]}),
+        correct_ask["id"]: json.dumps(correct_ask["plan"]),
+    }
+
+    scores = _score_plans(rows, texts)
+
+    assert scores["decision_checks"] == {
+        "missing_parameters": {"cases": 2, "proposed_call": 1, "matched_clarification_without_call": 1},
+        "ready": {"cases": 2, "unnecessary_clarification": 1, "matched_critical_actions": 1},
+    }
+    assert scores["by_intent"]["document"].get("exact_actions", 0) == 0
