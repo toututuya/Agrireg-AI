@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
-from time import perf_counter
+from itertools import zip_longest
+from time import perf_counter, sleep
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 
 from .clients import ControlledTools, DeepSeekClient
-from .models import AgentState, TaskPlan
+from .models import DEFAULT_TOOL_ATTEMPTS, AgentState, PlanStep, TaskPlan
 from .planner import PlannerModel, build_plan, compact_plan, followup_steps
+from .task_queue import CLARIFICATION_SEPARATOR, TASK_STATUS_LABELS, Subtask, public_subtask, split_subtasks, task_question
+from .tool_execution import assess_result, retry_delay
 
 
 REPORT_SYSTEM = """Select up to eight evidence numbers relevant to the current screening question.
@@ -24,109 +27,240 @@ def build_agent_graph(
     planner: PlannerModel | None = None,
     documents_enabled: bool = False,
     max_tool_steps: int = 6,
+    max_tool_attempts: int = DEFAULT_TOOL_ATTEMPTS,
 ):
-    def plan_node(state: AgentState) -> dict[str, Any]:
-        started = perf_counter()
-        plan = build_plan(
-            state["question"], bool(state.get("require_approval")), planner if planner is not None else llm,
-            documents_enabled, state.get("context"),
-        )
-        plan.steps = plan.steps[:max_tool_steps]
-        serialized = compact_plan(plan)
+    def prepare_tasks(state: AgentState) -> dict[str, Any]:
+        subtasks = split_subtasks(state["question"])
+        if not subtasks:
+            return {}
         return {
-            "plan": serialized,
-            "step_index": 0,
-            "status": "planned",
-            "events": [event("plan_ready", "已生成分析计划", plan.summary, {
-                "plan": serialized, "durationMs": elapsed_ms(started),
+            "subtasks": subtasks,
+            "events": [event("subtasks_ready", "已拆分分析任务", f"共 {len(subtasks)} 项。", {
+                "tasks": [public_subtask(task) for task in subtasks],
             })],
         }
 
-    def plan_route(state: AgentState) -> Literal["clarify", "execute", "verify"]:
+    def prepare_route(state: AgentState) -> Literal["plan", "dispatch_task"]:
+        return "dispatch_task" if state.get("subtasks") else "plan"
+
+    def dispatch_task(state: AgentState) -> dict[str, Any]:
+        tasks = {task["id"]: task for task in state["subtasks"]}
+        changes = []
+        selected = None
+        exhausted = attempt_count(state) >= max_tool_attempts
+        for task in tasks.values():
+            if task["status"] not in {"pending", "needs_input"}:
+                continue
+            unmet = [item for item in task["depends_on"] if tasks[item]["status"] != "completed"]
+            blocked = [item for item in unmet if tasks[item]["status"] in {"partial", "failed", "blocked"}]
+            if exhausted or blocked:
+                message = "本次任务的工具调用额度已用完。" if exhausted else (
+                    f"依赖的第 {'、'.join(map(str, blocked))} 项缺少完整结果。"
+                )
+                update: Subtask = task | {"status": "blocked", "message": message}
+                tasks[task["id"]] = update
+                changes.append(task_event(update))
+            elif task["status"] == "pending" and not unmet and selected is None:
+                selected = task
+        action: Literal["plan", "clarify", "verify"] = "verify"
+        if selected is not None:
+            selected = selected | {"status": "running", "message": ""}
+            tasks[selected["id"]] = selected
+            action = "plan"
+        else:
+            selected = next((task for task in tasks.values() if task["status"] == "needs_input"), None)
+            if selected is not None:
+                action = "clarify"
+        return {
+            "subtasks": list(tasks.values()), "active_task_id": selected["id"] if selected else None,
+            "dispatch_action": action, "task_result_start": len(state.get("tool_results", [])), "events": changes,
+        }
+
+    def dispatch_route(state: AgentState) -> Literal["plan", "clarify", "verify"]:
+        return state["dispatch_action"]
+
+    def plan_node(state: AgentState) -> dict[str, Any]:
+        started = perf_counter()
+        question, missing_reference = active_question(state)
+        task = active_task(state)
+        if missing_reference:
+            plan = TaskPlan(task_type="fact_check", summary="确认依赖项中的目标实体", missing_information=missing_reference)
+        else:
+            plan = build_plan(
+                question, bool(state.get("require_approval")), planner if planner is not None else llm,
+                documents_enabled, state.get("context"),
+            )
+        primary_count = len(plan.steps)
+        plan.steps = plan.steps[:max_tool_steps]
+        if task:
+            plan.steps = scope_steps(plan.steps, f"task-{task['id']}")
+        serialized = compact_plan(plan)
+        return {
+            "plan": serialized,
+            "step_index": 0, "step_attempt": 0, "retry_wait": 0, "replanned": False,
+            "primary_step_count": primary_count,
+            "status": "planned",
+            "events": [event("plan_ready", "已生成分析计划", plan.summary, {
+                "plan": serialized, "durationMs": elapsed_ms(started),
+            } | ({"taskId": task["id"]} if task else {}))],
+        }
+
+    def plan_route(state: AgentState) -> Literal["clarify", "execute", "finish_task", "verify"]:
         plan = TaskPlan.model_validate(state["plan"])
         if plan.missing_information:
+            if state.get("subtasks"):
+                return "finish_task"
             return "clarify" if state.get("clarification_count", 0) < 2 else "verify"
-        return "execute" if plan.steps else "verify"
+        if plan.steps and attempt_count(state) < max_tool_attempts:
+            return "execute"
+        return "finish_task" if state.get("subtasks") else "verify"
 
     def clarify_node(state: AgentState) -> dict[str, Any]:
-        plan = TaskPlan.model_validate(state["plan"])
+        task = active_task(state)
+        message = task["message"] if task else state["plan"]["missing_information"]
+        identity = {"taskId": task["id"]} if task else {}
         response = interrupt(
             {
                 "kind": "clarification",
                 "title": "需要补充任务信息",
-                "message": plan.missing_information,
+                "message": f"第 {task['id']} 项。{message}" if task else message,
+                **identity,
             }
         )
         value = response.get("value") if isinstance(response, dict) else response
         text = value.strip()[:200] if isinstance(value, str) else ""
+        if task:
+            update: Subtask = task | {
+                "status": "pending", "clarifications": [*task["clarifications"], text], "message": "",
+            }
+            return {
+                "subtasks": replace_subtask(state, update), "status": "resumed",
+                "events": [event("clarification_received", "已收到补充信息", text, identity)],
+            }
         return {
-            "question": f"{state['question']}；补充信息：{text}" if text else state["question"],
+            "question": f"{state['question']}{CLARIFICATION_SEPARATOR}{text}" if text else state["question"],
             "clarification_count": state.get("clarification_count", 0) + 1,
             "status": "resumed",
             "events": [event("clarification_received", "已收到补充信息", text)],
         }
 
+    def clarify_route(state: AgentState) -> Literal["plan", "dispatch_task"]:
+        return "dispatch_task" if state.get("subtasks") else "plan"
+
     def execute_node(state: AgentState) -> dict[str, Any]:
         plan = TaskPlan.model_validate(state["plan"])
         index = int(state.get("step_index", 0))
         step = plan.steps[index]
+        attempt = state.get("step_attempt", 0) + 1
+        total = attempt_count(state) + 1
+        task_id = state.get("active_task_id")
+        identity = {"tool": step.tool, "stepId": step.id, "attempt": attempt}
+        if task_id is not None:
+            identity["taskId"] = task_id
+        if state.get("retry_wait"):
+            sleep(state["retry_wait"])
         started = perf_counter()
         try:
-            result = tools.execute(step.tool, step.arguments, state["question"])
-            evidence = result.get("evidence") or []
-            tool_event = event(
-                "tool_completed",
-                step.title,
-                result.get("summary", "工具调用完成"),
-                {"tool": step.tool, "stepId": step.id, "durationMs": elapsed_ms(started)},
-            )
-            return {
-                "step_index": index + 1,
-                "tool_results": [{"step": step.model_dump(), "evidence_count": len(evidence)}],
-                "evidence": evidence,
-                "events": [tool_event],
-                "status": "running",
-            }
-        except Exception:
-            detail = friendly_tool_error(step.tool)
-            return {
-                "step_index": index + 1,
-                "tool_results": [{"step": step.model_dump(), "evidence_count": 0, "error": detail}],
-                "events": [event("tool_failed", step.title, detail, {
-                    "tool": step.tool, "stepId": step.id, "durationMs": elapsed_ms(started),
-                })],
-                "status": "running",
-            }
+            question, _ = active_question(state)
+            result = tools.execute(step.tool, step.arguments, question)
+        except Exception as exc:
+            delay = retry_delay(step, exc, attempt)
+            if delay is not None and total < max_tool_attempts:
+                return {
+                    "step_attempt": attempt, "retry_wait": delay, "tool_attempts": total, "status": "running",
+                    "events": [event("tool_retrying", step.title, "遇到暂时性故障，即将重试当前步骤。", identity | {
+                        "durationMs": elapsed_ms(started), "retryDelayMs": round(delay * 1000),
+                    })],
+                }
+            outcome, evidence, detail = "failed", [], friendly_tool_error(step.tool)
+        else:
+            outcome, evidence, detail = assess_result(step, result)
+        tool_result = {
+            "step": step.model_dump(), "evidence_count": len(evidence), "outcome": outcome,
+            "attempts": attempt, "detail": detail, "task_id": task_id,
+        }
+        if outcome == "failed":
+            tool_result["error"] = detail
+        event_kind = {"failed": "tool_failed", "unexpected": "tool_failed"}.get(outcome, "tool_completed")
+        return {
+            "step_index": index + 1, "step_attempt": 0, "retry_wait": 0, "tool_attempts": total,
+            "tool_results": [tool_result], "status": "running",
+            "evidence": [item | {"task_id": task_id} for item in evidence] if task_id is not None else evidence,
+            "events": [event(event_kind, step.title, detail, identity | {
+                "durationMs": elapsed_ms(started), "outcome": outcome,
+            })],
+        }
 
-    def execute_route(state: AgentState) -> Literal["execute", "replan", "verify"]:
-        plan = TaskPlan.model_validate(state["plan"])
-        if state.get("step_index", 0) < len(plan.steps):
+    def execute_route(state: AgentState) -> Literal["execute", "replan", "finish_task", "verify"]:
+        have_budget = attempt_count(state) < max_tool_attempts
+        step_count = len(state["plan"]["steps"])
+        if have_budget and state.get("step_index", 0) < step_count:
             return "execute"
-        if not state.get("replanned") and len(plan.steps) < max_tool_steps:
+        if (
+            have_budget and not state.get("replanned") and step_count < max_tool_steps
+            and any(item.get("outcome", "ok" if item["evidence_count"] else "empty") != "ok" for item in task_results(state))
+        ):
             return "replan"
-        return "verify"
+        return "finish_task" if state.get("subtasks") else "verify"
 
     def replan_node(state: AgentState) -> dict[str, Any]:
         plan = TaskPlan.model_validate(state["plan"])
+        question, _ = active_question(state)
         additions = followup_steps(
-            state["question"], state.get("tool_results") or [], documents_enabled, max_tool_steps - len(plan.steps),
+            question, task_results(state), documents_enabled,
+            min(max_tool_steps - len(plan.steps), max_tool_attempts - attempt_count(state)),
         )
         if not additions:
             return {"replanned": True}
+        if state.get("subtasks"):
+            additions = scope_steps(additions, f"task-{state['active_task_id']}-followup")
         plan.steps.extend(additions)
         return {
             "replanned": True,
             "plan": compact_plan(plan),
             "events": [event("plan_updated", "按工具反馈补查", "；".join(step.title for step in additions), {
                 "steps": [step.model_dump() for step in additions],
-            })],
+            } | ({"taskId": state["active_task_id"]} if state.get("subtasks") else {}))],
         }
 
-    def replan_route(state: AgentState) -> Literal["execute", "verify"]:
-        return "execute" if state["step_index"] < len(state["plan"]["steps"]) else "verify"
+    def replan_route(state: AgentState) -> Literal["execute", "finish_task", "verify"]:
+        if attempt_count(state) < max_tool_attempts and state["step_index"] < len(state["plan"]["steps"]):
+            return "execute"
+        return "finish_task" if state.get("subtasks") else "verify"
+
+    def finish_task(state: AgentState) -> dict[str, Any]:
+        task = active_task(state)
+        assert task is not None
+        plan = TaskPlan.model_validate(state["plan"])
+        results = task_results(state)
+        count = state["primary_step_count"]
+        ok = sum(item["outcome"] == "ok" for item in results[:count])
+        if plan.missing_information:
+            status = "blocked" if len(task["clarifications"]) >= 2 else "needs_input"
+            message = plan.missing_information
+        elif count and ok == count:
+            status, message = "completed", ""
+        elif not results:
+            status, message = "blocked", "本次任务的工具调用额度已用完。"
+        else:
+            status = "partial" if any(item["evidence_count"] for item in results) else "failed"
+            issues = [item["detail"] for item in results[:count] if item["outcome"] != "ok"]
+            if len(results) < count:
+                issues.append("部分计划步骤受执行额度限制。")
+            message = " ".join(dict.fromkeys(issues))
+        labels = verified_labels(state, task["id"])
+        question = active_question(state)[0].casefold()
+        entities = [
+            entity for entity in plan.entities if entity.strip() and entity.casefold() in labels
+            and entity.casefold() in question
+        ] if status == "completed" else []
+        update: Subtask = task | {
+            "status": status, "message": message, "entities": entities, "requires_approval": plan.requires_approval,
+        }
+        return {"subtasks": replace_subtask(state, update), "events": [task_event(update)]}
 
     def verify_node(state: AgentState) -> dict[str, Any]:
-        evidence = deduplicate_evidence(state.get("evidence") or [])
+        evidence = deduplicate_evidence(evidence_in_report_order(state))
         conflicts = detect_conflicts(evidence)
         coverage = "充分" if len(evidence) >= 4 else "有限" if evidence else "不足"
         detail = f"汇总 {len(evidence)} 条不重复证据，证据覆盖{coverage}。"
@@ -147,6 +281,12 @@ def build_agent_graph(
         }
 
     def verify_route(state: AgentState) -> Literal["approval", "report"]:
+        if state.get("subtasks"):
+            requires_approval = state.get("require_approval") or any(
+                task["requires_approval"] and task["status"] in {"completed", "partial"}
+                for task in state["subtasks"]
+            )
+            return "approval" if requires_approval and state.get("verified_evidence") else "report"
         plan = TaskPlan.model_validate(state["plan"])
         return "approval" if plan.requires_approval and not plan.missing_information else "report"
 
@@ -174,13 +314,18 @@ def build_agent_graph(
 
     def report_node(state: AgentState) -> dict[str, Any]:
         report = build_report(state, llm)
+        tasks = state.get("subtasks") or []
+        payload = {"tasks": [public_subtask(task) for task in tasks]} if tasks else {}
         return {
             "report": report,
             "status": "completed",
-            "events": [event("report_ready", "分析报告已生成", "报告包含结论、编号证据、差异与适用边界。")],
+            "events": [event("report_ready", "分析报告已生成", "报告包含结论、编号证据、差异与适用边界。", payload)],
         }
 
     builder = StateGraph(AgentState)
+    builder.add_node("prepare_tasks", prepare_tasks)
+    builder.add_node("dispatch_task", dispatch_task)
+    builder.add_node("finish_task", finish_task)
     builder.add_node("plan", plan_node)
     builder.add_node("clarify", clarify_node)
     builder.add_node("execute", execute_node)
@@ -188,15 +333,72 @@ def build_agent_graph(
     builder.add_node("verify", verify_node)
     builder.add_node("approval", approval_node)
     builder.add_node("report", report_node)
-    builder.add_edge(START, "plan")
+    builder.add_edge(START, "prepare_tasks")
+    builder.add_conditional_edges("prepare_tasks", prepare_route)
+    builder.add_conditional_edges("dispatch_task", dispatch_route)
+    builder.add_edge("finish_task", "dispatch_task")
     builder.add_conditional_edges("plan", plan_route)
-    builder.add_edge("clarify", "plan")
+    builder.add_conditional_edges("clarify", clarify_route)
     builder.add_conditional_edges("execute", execute_route)
     builder.add_conditional_edges("replan", replan_route)
     builder.add_conditional_edges("verify", verify_route)
     builder.add_edge("approval", "report")
     builder.add_edge("report", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def active_task(state: AgentState) -> Subtask | None:
+    task_id = state.get("active_task_id")
+    return next((task for task in state.get("subtasks", []) if task["id"] == task_id), None)
+
+
+def active_question(state: AgentState) -> tuple[str, str]:
+    task = active_task(state)
+    return task_question(task, state["subtasks"]) if task else (state["question"], "")
+
+
+def replace_subtask(state: AgentState, update: Subtask) -> list[Subtask]:
+    return [update if task["id"] == update["id"] else task for task in state["subtasks"]]
+
+
+def task_event(task: Subtask) -> dict[str, Any]:
+    label = TASK_STATUS_LABELS[task["status"]]
+    return event("task_status", f"第 {task['id']} 项{label}", task["message"], public_subtask(task))
+
+
+def attempt_count(state: AgentState) -> int:
+    return state.get("tool_attempts", len(state.get("tool_results", [])))
+
+
+def scope_steps(steps: list[PlanStep], prefix: str) -> list[PlanStep]:
+    return [step.model_copy(update={"id": f"{prefix}:{step.id}"}) for step in steps]
+
+
+def task_results(state: AgentState) -> list[dict[str, Any]]:
+    return state.get("tool_results", [])[state.get("task_result_start", 0):]
+
+
+def verified_labels(state: AgentState, task_id: int) -> set[str]:
+    labels = set()
+    for item in state.get("evidence", []):
+        if item.get("task_id") != task_id:
+            continue
+        for value in (item.get("title"), item.get("properties", {}).get("registrationNumber")):
+            if isinstance(value, str):
+                labels.add(value.strip().casefold())
+    return labels
+
+
+def evidence_in_report_order(state: AgentState) -> list[dict[str, Any]]:
+    evidence = state.get("evidence") or []
+    tasks = state.get("subtasks") or []
+    if not tasks:
+        return evidence
+    by_task: dict[int, list[dict[str, Any]]] = {task["id"]: [] for task in tasks}
+    for item in evidence:
+        if item.get("task_id") in by_task:
+            by_task[item["task_id"]].append(item)
+    return [item for batch in zip_longest(*by_task.values()) for item in batch if item is not None]
 
 
 def event(kind: str, title: str, detail: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -211,7 +413,7 @@ def deduplicate_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     seen = set()
     for item in items:
-        key = item.get("id") or (item.get("source"), item.get("title"), item.get("summary"))
+        key = evidence_key(item)
         if key in seen:
             continue
         seen.add(key)
@@ -219,6 +421,11 @@ def deduplicate_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized["index"] = len(result) + 1
         result.append(normalized)
     return result[:48]
+
+
+def evidence_key(item: dict[str, Any]) -> str | tuple[str, ...]:
+    identity = item.get("id")
+    return str(identity) if identity else tuple(str(item.get(key, "")) for key in ("source", "title", "summary"))
 
 
 def detect_conflicts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -261,12 +468,14 @@ def public_evidence(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_report(state: AgentState, llm: DeepSeekClient) -> str:
-    plan = TaskPlan.model_validate(state["plan"])
     evidence = state.get("verified_evidence") or []
     conflicts = state.get("conflicts") or []
     decision = state.get("approval_decision", "not_required")
     if decision == "reject":
         return "# 分析已停止\n\n你已拒绝生成结论性报告。已检索的证据和执行记录仍保留在任务中，后续可以重新核验。"
+    if state.get("subtasks"):
+        return build_subtask_report(state)
+    plan = TaskPlan.model_validate(state["plan"])
     if plan.missing_information:
         return f"# 信息待补\n\n{plan.missing_information}"
 
@@ -289,15 +498,50 @@ def build_report(state: AgentState, llm: DeepSeekClient) -> str:
             selected = [by_index[value] for value in valid_ids[:8]] or selected
     findings = [f"- {item.get('summary')} [{item['index']}]" for item in selected]
     conflict_lines = [f"- {item['message']}" for item in conflicts] or ["- 当前自动检查未发现同字段的直接冲突；这不等于来源已完成专家复核。"]
+    results = state.get("tool_results") or []
+    expected = state.get("primary_step_count", len(plan.steps))
+    successful = sum(result.get("outcome", "ok" if result["evidence_count"] else "empty") == "ok"
+                     for result in results[:expected])
+    incomplete = [
+        f"- {result['step']['title']}。{result['detail']}"
+        for result in results[:expected] if result.get("outcome") not in {None, "ok"}
+    ]
+    if len(results) < expected:
+        incomplete.append("- 部分计划步骤受执行额度限制。")
+    progress = f"\n\n## 未完成步骤\n\n{chr(10).join(incomplete)}" if incomplete else ""
     return (
         "# 证据核验报告\n\n"
         f"## 任务\n\n{state['question']}\n\n"
-        f"## 结论摘要\n\n已完成 {len(plan.steps)} 个受控步骤，汇总 {len(evidence)} 条不重复证据，证据覆盖为“{state.get('coverage', '不足')}”。"
+        f"## 结论摘要\n\n原计划 {expected} 个步骤中，{successful} 个返回所需证据。"
+        f"汇总 {len(evidence)} 条不重复证据，证据覆盖为“{state.get('coverage', '不足')}”。"
         "以下内容用于知识检索与初步筛查，不构成登记或合规终审。\n\n"
-        f"## 主要发现\n\n{chr(10).join(findings) if findings else '- 当前没有足够证据支持具体结论。'}\n\n"
+        f"## 主要发现\n\n{chr(10).join(findings) if findings else '- 当前没有足够证据支持具体结论。'}{progress}\n\n"
         f"## 差异与待核对项\n\n{chr(10).join(conflict_lines)}\n\n"
         "## 下一步\n\n回到产品标签、登记主管部门原文或权威化学数据库核对关键字段；涉及实际使用或合规判断时由领域人员确认。"
     )
+
+
+def build_subtask_report(state: AgentState) -> str:
+    tasks = state["subtasks"]
+    complete = sum(task["status"] == "completed" for task in tasks)
+    sections = [
+        "# 多任务证据报告",
+        f"{complete}/{len(tasks)} 项取得完整结果，共尝试 {attempt_count(state)} 次受控工具调用。",
+    ]
+    numbered = {evidence_key(item): item for item in state.get("verified_evidence", [])}
+    for task in tasks:
+        question = " ".join(task["question"].split())
+        sections.append(f"## 第 {task['id']} 项 · {TASK_STATUS_LABELS[task['status']]}\n\n{question}")
+        if task["message"]:
+            sections.append(task["message"])
+        keys = dict.fromkeys(evidence_key(item) for item in state.get("evidence", [])
+                             if item.get("task_id") == task["id"])
+        evidence = [numbered[key] for key in keys if key in numbered][:2]
+        if evidence:
+            sections.append("\n".join(f"- {item['summary']} [{item['index']}]" for item in evidence))
+    if state.get("conflicts"):
+        sections.append("## 待核对差异\n\n" + "\n".join(f"- {item['message']}" for item in state["conflicts"]))
+    return "\n\n".join(sections)
 
 
 def friendly_tool_error(tool: str) -> str:

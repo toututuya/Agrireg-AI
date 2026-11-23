@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .models import DEFAULT_TOOL_ATTEMPTS
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -27,6 +29,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(Path("./data"), alias="AGENT_DATA_DIR")
     request_timeout_seconds: float = Field(20.0, alias="AGENT_REQUEST_TIMEOUT_SECONDS")
     max_tool_steps: int = Field(6, ge=1, le=6, alias="AGENT_MAX_TOOL_STEPS")
+    max_tool_attempts: int = Field(DEFAULT_TOOL_ATTEMPTS, ge=1, le=96, alias="AGENT_MAX_TOOL_ATTEMPTS")
     milvus_uri: str = Field("", alias="AGENT_MILVUS_URI")
     milvus_collection: str = Field("agrireg_documents_v1", alias="AGENT_MILVUS_COLLECTION")
     milvus_token: SecretStr = Field(SecretStr(""), alias="AGENT_MILVUS_TOKEN")
