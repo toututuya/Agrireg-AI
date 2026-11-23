@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     data_dir: Path = Field(Path("./data"), alias="AGENT_DATA_DIR")
     request_timeout_seconds: float = Field(20.0, alias="AGENT_REQUEST_TIMEOUT_SECONDS")
     max_tool_steps: int = Field(6, alias="AGENT_MAX_TOOL_STEPS")
+    milvus_uri: str = Field("", alias="AGENT_MILVUS_URI")
+    milvus_collection: str = Field("agrireg_documents_v1", alias="AGENT_MILVUS_COLLECTION")
+    milvus_token: SecretStr = Field(SecretStr(""), alias="AGENT_MILVUS_TOKEN")
+    retrieval_device: str = Field("", alias="AGENT_RETRIEVAL_DEVICE")
+    embedding_model: str = Field("BAAI/bge-m3", alias="AGENT_EMBEDDING_MODEL")
+    reranker_model: str = Field("BAAI/bge-reranker-v2-m3", alias="AGENT_RERANKER_MODEL")
 
     deepseek_enabled: bool = Field(False, alias="DEEPSEEK_ENABLED")
     deepseek_api_key: str = Field("", alias="DEEPSEEK_API_KEY")
