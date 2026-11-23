@@ -231,7 +231,9 @@ GraphRAG 在该候选集上提升 **13.33 个百分点**，但中位延迟增加
 - Neo4j 4.4.x
 - Python 3.11+
 
-### 1. 配置并启动 API
+### 1. 准备 Neo4j 并启动 API
+
+本地空库可以导入五个合成实体验证图谱搜索和关系路径。已有图谱可直接使用原库连接。[本地 Neo4j 演示](ops/local-demo/README_CN.md)
 
 ```powershell
 cd api
