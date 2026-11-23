@@ -6,7 +6,7 @@
 | 分层记忆和压缩 | 前三轮的问题与较早实体直接进入规划提示词，窗口外的旧结论无法确切回查。 | LangGraph 检查点保存执行状态。最近三轮与较早分析摘要保留在 1,200 字符的序列化窗口。SQLite 保存分析索引和完整历史，可按轮次或主题回查。规划器收到本轮解析后的问题。 |
 | 二维时间和来源 | 对同一登记号记忆没有版本，补录更正无法还原当时知道什么。 | 槽位按生效时间和系统记录时间追加版本。指定时点可独立查询生效值和当时已知值。用户记忆用于明确查询对象，业务结论重新查证。 |
 | 工具失败与程序性记忆 | 临时故障已有重试和检查点。上一轮补查的实际成败无法影响下一轮选取备用工具。 | 同一会话记录可归因的补查成败，只调整既有备用工具的优先级。工具参数、重试预算、工作流确认条件仍由程序控制。 |
-| 证据和结果 | 关系路径曾以工具统计和关系编码为主。图谱问答缺少释义时会直接止步。 | 从可核验的边重建路径，输出自然语言、方向和逐条引用。明确登记号可核验对应的 Milvus 资料，登记快照标明来源类型。图谱缺少通用释义时使用 Qwen3 基础模型，登记判断和用药问题要求来源。 |
+| 证据和结果 | 关系路径曾以工具统计和关系编码为主。图谱问答缺少释义时会直接止步。 | 从可核验的边重建路径，按节点类型解释实际关系并逐条引用。明确登记号可核验对应的 Milvus 资料，登记快照标明来源类型。图谱缺少通用释义时使用 Qwen3 基础模型，登记判断和用药问题要求来源。 |
 | 发布前验收 | 早期验收主要检查计划执行，缺少对答案正确性和来源命中的验证。 | 回归同时检查冲突有无误调用、补参后是否使用正确登记号、时间回查结果、跨会话泄漏、路径是否真的连通，以及证据来源是否匹配登记号。 |
 
 窗口和按需加载沿用上下文工程及 LangGraph 持久化思路。生效时间与记录时间独立保存借鉴了 Zep 的时态设计。工具输入输出验证和结果评分分别对照 OpenAI Agents SDK 与 Anthropic 的生产 Agent skill。 [Anthropic 上下文工程](https://www.anthropic.com/research/effective-context-engineering-for-ai-agents) · [LangChain 短期记忆](https://docs.langchain.com/oss/python/langchain/short-term-memory) · [Zep 论文](https://arxiv.org/abs/2501.13956) · [OpenAI Agents SDK Guardrails](https://github.com/openai/openai-agents-python/blob/main/docs/guardrails.md) · [Anthropic Launch Your Agent](https://github.com/anthropics/launch-your-agent/blob/main/.claude/skills/launch-your-agent/SKILL.md)

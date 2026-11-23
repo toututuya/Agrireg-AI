@@ -6,17 +6,25 @@ from typing import Any
 
 
 RELATION_LABELS = {
-    "INCLUDES": "包含有效成分",
-    "APPLIED_TO": "登记作物为",
-    "TREATS": "登记防治对象为",
-    "INFECTS": "记录的侵染关联为",
-    "RELATED_TO": "关联",
-    "BELONGS_TO": "属于",
+    ("INCLUDES", "RegisterNumber", "ActiveSubstance"): "的有效成分包括",
+    ("INCLUDES", "ChemicalClasses", "ActiveSubstance"): "这一化学类别包括有效成分",
+    ("INCLUDES", "PesticideCategory", "ChemicalClasses"): "这一农药类别包括化学类别",
+    ("APPLIED_TO", "RegisterNumber", "Crop"): "的登记作物包括",
+    ("TREATS", "RegisterNumber", "Disease"): "的登记防治对象包括",
+    ("INFECTS", "Disease", "Crop"): "的侵染关联作物包括",
+    ("DETERMINES", "ChemicalClasses", "TargetSite"): "在图谱中关联作用靶点",
+    ("DETERMINES", "TargetSite", "ModeOfAction"): "在图谱中关联作用方式",
 }
 
 
-def relation_sentence(source: str, relation: str, target: str) -> str:
-    return f"「{source}」{RELATION_LABELS.get(relation, '在图谱中关联')}「{target}」"
+def relation_sentence(source: dict[str, Any], relation: str, target: dict[str, Any]) -> str:
+    left, right = source.get("label"), target.get("label")
+    predicate = RELATION_LABELS.get((relation, left, right))
+    if predicate is None:
+        predicate = RELATION_LABELS.get((relation, right, left))
+        if predicate:
+            source, target = target, source
+    return f"「{source['name']}」{predicate or '在图谱中关联'}「{target['name']}」"
 
 
 def verified_chain(

@@ -218,7 +218,7 @@ class ControlledTools:
     def _graph_result(self, tool: str, payload: dict[str, Any], terms: list[str]) -> dict[str, Any]:
         evidence: list[dict[str, Any]] = []
         nodes = payload.get("nodes") or []
-        names = {str(node.get("id")): node.get("name") or "未知实体" for node in nodes}
+        by_id = {str(node.get("id")): node for node in nodes if node.get("name")}
         for node in nodes[:16]:
             metadata = node.get("evidence") or {}
             properties = node.get("properties") or {}
@@ -249,14 +249,16 @@ class ControlledTools:
                 }
             )
         for edge in (payload.get("edges") or [])[:24]:
-            source = names.get(str(edge.get("source")), str(edge.get("source")))
-            target = names.get(str(edge.get("target")), str(edge.get("target")))
+            source = by_id.get(str(edge.get("source")))
+            target = by_id.get(str(edge.get("target")))
+            if source is None or target is None:
+                continue
             relation = edge.get("type") or "RELATED_TO"
             evidence.append(
                 {
                     "id": f"graph-edge:{edge.get('source')}:{edge.get('target')}:{relation}",
                     "source": "GDP-KG",
-                    "title": f"{source} → {target}",
+                    "title": f"{source['name']} · {target['name']}",
                     "kind": "graph_relation",
                     "summary": relation_sentence(source, relation, target),
                     "url": "",

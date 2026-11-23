@@ -49,12 +49,12 @@ def test_document_fallback_verifies_the_exact_registration():
 
 def test_relationship_report_reconstructs_order_and_checks_each_link(tmp_path):
     settings = Settings(AGENT_DATA_DIR=tmp_path, DEEPSEEK_ENABLED=False)
-    edges = [{"source": 1, "target": 3, "type": "APPLIED_TO"}, {"source": 1, "target": 2, "type": "TREATS"}]
+    edges = [{"source": 1, "target": 3, "type": "APPLIED_TO"}, {"source": 2, "target": 1, "type": "INCLUDES"}]
     path = {
         "found": True, "centerId": 2, "targetId": 3, "pathLength": 2,
         "nodes": [
             {"id": 1, "name": "00A657-62", "label": "RegisterNumber"},
-            {"id": 2, "name": "网斑病", "label": "Disease", "center": True},
+            {"id": 2, "name": "Chlorantraniliprole", "label": "ActiveSubstance", "center": True},
             {"id": 3, "name": "春大麦", "label": "Crop"},
         ],
     }
@@ -66,14 +66,14 @@ def test_relationship_report_reconstructs_order_and_checks_each_link(tmp_path):
 
     tools = ControlledTools(settings, transport=httpx.MockTransport(handler))
     graph = build_agent_graph(tools, DeepSeekClient(settings), InMemorySaver())
-    question = {"question": "查找“网斑病”到“春大麦”的关系路径"}
+    question = {"question": "查找“Chlorantraniliprole”到“春大麦”的关系路径"}
     good = graph.invoke(question, {"configurable": {"thread_id": "good"}})
-    assert "网斑病 → 00A657-62 → 春大麦" in good["report"]
-    assert "「00A657-62」登记防治对象为「网斑病」" in good["report"]
-    assert "「00A657-62」登记作物为「春大麦」" in good["report"]
+    assert "Chlorantraniliprole → 00A657-62 → 春大麦" in good["report"]
+    assert "「00A657-62」的有效成分包括「Chlorantraniliprole」" in good["report"]
+    assert "「00A657-62」的登记作物包括「春大麦」" in good["report"]
     assert "[1]" in good["report"] and "[2]" in good["report"]
     assert "APPLIED_TO" not in good["report"]
     edges.pop()
     broken = graph.invoke(question, {"configurable": {"thread_id": "broken"}})
-    assert "完整路径" in broken["report"] and "网斑病 →" not in broken["report"]
+    assert "完整路径" in broken["report"] and "Chlorantraniliprole →" not in broken["report"]
     assert broken["tool_results"][0]["outcome"] == "partial"

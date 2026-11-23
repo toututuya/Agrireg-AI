@@ -235,22 +235,33 @@ public class DeepSeekGraphAssistantService {
         for (Map<String, Object> fact : evidence) {
             String details = "attribute".equals(fact.get("factType"))
                     ? String.valueOf(fact.get("targetName"))
-                    : "「" + fact.get("sourceName") + "」" + relationLabel(fact.get("relation"))
-                            + "「" + fact.get("targetName") + "」";
+                    : relationshipDescription(fact);
             lines.add(details + " [" + fact.get("index") + "]");
             if (lines.size() == 3) break;
         }
         return String.join("\n", lines);
     }
 
-    private String relationLabel(Object relation) {
-        switch (String.valueOf(relation)) {
-            case "INCLUDES": return "包含有效成分";
-            case "APPLIED_TO": return "登记作物为";
-            case "TREATS": return "登记防治对象为";
-            case "INFECTS": return "记录的侵染关联为";
-            default: return "在图谱中关联";
+    private String relationshipDescription(Map<String, Object> fact) {
+        String relation = String.valueOf(fact.get("relation"));
+        String source = String.valueOf(fact.get("sourceName"));
+        String target = String.valueOf(fact.get("targetName"));
+        String sourceLabel = String.valueOf(fact.get("sourceLabel"));
+        String targetLabel = String.valueOf(fact.get("targetLabel"));
+        if ("INCLUDES".equals(relation) && "ActiveSubstance".equals(sourceLabel) && "RegisterNumber".equals(targetLabel)) {
+            return "「" + target + "」的有效成分包括「" + source + "」";
         }
+        String label = "在图谱中关联";
+        if ("INCLUDES".equals(relation) && "RegisterNumber".equals(sourceLabel) && "ActiveSubstance".equals(targetLabel)) {
+            label = "的有效成分包括";
+        } else if ("APPLIED_TO".equals(relation) && "RegisterNumber".equals(sourceLabel) && "Crop".equals(targetLabel)) {
+            label = "的登记作物包括";
+        } else if ("TREATS".equals(relation) && "RegisterNumber".equals(sourceLabel) && "Disease".equals(targetLabel)) {
+            label = "的登记防治对象包括";
+        } else if ("INFECTS".equals(relation) && "Disease".equals(sourceLabel) && "Crop".equals(targetLabel)) {
+            label = "的侵染关联作物包括";
+        }
+        return "「" + source + "」" + label + "「" + target + "」";
     }
 
     private List<String> planSearchTerms(String question, List<Map<String, String>> conversationContext) throws Exception {
@@ -444,9 +455,7 @@ public class DeepSeekGraphAssistantService {
                         .append(") 的 ").append(fact.get("property")).append(" = ")
                         .append(fact.get("value")).append('\n');
             } else {
-                facts.append(fact.get("sourceName")).append(" (").append(fact.get("sourceLabel")).append(") --")
-                        .append(fact.get("relation")).append("-- ")
-                        .append(fact.get("targetName")).append(" (").append(fact.get("targetLabel")).append(")\n");
+                facts.append(relationshipDescription(fact)).append('\n');
             }
         }
 
