@@ -103,3 +103,25 @@ def test_default_api_reports_disabled_and_rejects_bad_input():
             assert client.post("/api/agent/documents/search", json={"query": " "}).status_code == 422
     finally:
         del app.dependency_overrides[get_document_search]
+
+
+def test_real_milvus_lite_ingestion_and_chinese_bm25(tmp_path):
+    pymilvus = pytest.importorskip("pymilvus")
+    pytest.importorskip("milvus_lite")
+    pytest.importorskip("jieba")
+    client = pymilvus.MilvusClient(str(tmp_path / "docs.db"))
+    service = MilvusDocumentSearch(client, Settings(AGENT_MILVUS_COLLECTION="test_documents"))
+    service.encode = Mock(side_effect=lambda texts: [Mock(tolist=lambda: [1.0] + [0.0] * 1023) for _ in texts])
+    chunks = [
+        next(chunk_page(source_page(document_id="rice", text="水稻登记条目。水稻样例。"))),
+        next(chunk_page(source_page(document_id="apple", text="苹果登记条目。苹果样例。", registration_number="PDA002"))),
+    ]
+    try:
+        assert service.ingest(iter(chunks)) == 2
+        assert service.ingest(iter(chunks)) == 2
+        request = DocumentSearchRequest(query="水稻", registration_number="PDA001", mode="bm25")
+        hits = service.search(request)
+        assert [(hit.document_id, hit.page) for hit in hits] == [("rice", 2)]
+        assert service.search(request.model_copy(update={"registration_number": "PDA999"})) == []
+    finally:
+        client.close()
