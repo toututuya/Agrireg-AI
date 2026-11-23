@@ -7,6 +7,7 @@ import math
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
+from contextlib import nullcontext
 from functools import cached_property
 from itertools import combinations
 from pathlib import Path
@@ -96,7 +97,7 @@ def _load_model(base: str, device: str, adapter: str = "", four_bit: bool = Fals
     return tokenizer, model if four_bit else model.to(device)
 
 
-def _generate_batch(tokenizer, model, system: str, users: list[str]) -> list[str]:
+def _generate_batch(tokenizer, model, system: str, users: list[str], max_new_tokens: int = MAX_GENERATION) -> list[str]:
     import torch
     from transformers import GenerationConfig
 
@@ -107,7 +108,7 @@ def _generate_batch(tokenizer, model, system: str, users: list[str]) -> list[str
     mask = torch.tensor([[0] * (width - len(prompt)) + [1] * len(prompt) for prompt in prompts],
                         device=model.device)
     generation = GenerationConfig.from_model_config(model.config)
-    generation.max_new_tokens = MAX_GENERATION
+    generation.max_new_tokens = max_new_tokens
     generation.pad_token_id = tokenizer.pad_token_id
     with torch.inference_mode():
         output = model.generate(
@@ -157,6 +158,19 @@ class LocalQwenPlanner:
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
             logger.warning("Local Qwen3 planner unavailable: %s", type(exc).__name__)
             return None
+
+    def base_completion(self, system: str, user: str) -> str | None:
+        if not self._lock.acquire(timeout=2):
+            return None
+        try:
+            tokenizer, model = self.model
+            with model.disable_adapter() if self.adapter else nullcontext():
+                return _generate_batch(tokenizer, model, system, [user], max_new_tokens=160)[0]
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Local Qwen3 answer unavailable: %s", type(exc).__name__)
+            return None
+        finally:
+            self._lock.release()
 
 
 def train(

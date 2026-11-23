@@ -8,9 +8,11 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from .answering import AnswerModel, explain_general
 from .clients import ControlledTools, DeepSeekClient
 from .models import DEFAULT_TOOL_ATTEMPTS, AgentState, PlanStep, TaskPlan
-from .planner import PlannerModel, build_plan, compact_plan, definition_subject, followup_steps
+from .planner import PlannerModel, build_plan, compact_plan, definition_subject, followup_steps, resolve_context
+from .presentation import evidence_line, important_evidence, render_finding, tool_finding
 from .task_queue import CLARIFICATION_SEPARATOR, TASK_STATUS_LABELS, Subtask, public_subtask, split_subtasks, task_question
 from .tool_execution import assess_result, retry_delay
 
@@ -28,6 +30,7 @@ def build_agent_graph(
     documents_enabled: bool = False,
     max_tool_steps: int = 6,
     max_tool_attempts: int = DEFAULT_TOOL_ATTEMPTS,
+    answer_model: AnswerModel | None = None,
 ):
     def prepare_tasks(state: AgentState) -> dict[str, Any]:
         subtasks = split_subtasks(state["question"])
@@ -181,6 +184,10 @@ def build_agent_graph(
         }
         if outcome == "failed":
             tool_result["error"] = detail
+        if outcome == "ok":
+            finding = tool_finding(step.tool, result.get("data"), evidence)
+            if finding:
+                tool_result["finding"] = finding
         event_kind = {"failed": "tool_failed", "unexpected": "tool_failed"}.get(outcome, "tool_completed")
         return {
             "step_index": index + 1, "step_attempt": 0, "retry_wait": 0, "tool_attempts": total,
@@ -206,9 +213,12 @@ def build_agent_graph(
     def replan_node(state: AgentState) -> dict[str, Any]:
         plan = TaskPlan.model_validate(state["plan"])
         question, _ = active_question(state)
+        context = state.get("context") or {}
+        question, _ = resolve_context(question, context)
         additions = followup_steps(
             question, task_results(state), documents_enabled,
             min(max_tool_steps - len(plan.steps), max_tool_attempts - attempt_count(state)),
+            context.get("procedures"),
         )
         if not additions:
             return {"replanned": True}
@@ -249,7 +259,7 @@ def build_agent_graph(
                 issues.append("部分计划步骤受执行额度限制。")
             message = " ".join(dict.fromkeys(issues))
         labels = verified_labels(state, task["id"])
-        question = active_question(state)[0].casefold()
+        question = resolve_context(active_question(state)[0], state.get("context") or {})[0].casefold()
         entities = [
             entity for entity in plan.entities if entity.strip() and entity.casefold() in labels
             and entity.casefold() in question
@@ -260,7 +270,10 @@ def build_agent_graph(
         return {"subtasks": replace_subtask(state, update), "events": [task_event(update)]}
 
     def verify_node(state: AgentState) -> dict[str, Any]:
-        evidence = deduplicate_evidence(evidence_in_report_order(state))
+        prioritized = {
+            identity for result in state.get("tool_results", []) for identity in important_evidence(result.get("finding") or {})
+        }
+        evidence = deduplicate_evidence(sorted(evidence_in_report_order(state), key=lambda item: item.get("id") not in prioritized))
         conflicts = detect_conflicts(evidence)
         coverage = "充分" if len(evidence) >= 4 else "有限" if evidence else "不足"
         detail = f"汇总 {len(evidence)} 条不重复证据，证据覆盖{coverage}。"
@@ -313,7 +326,7 @@ def build_agent_graph(
         }
 
     def report_node(state: AgentState) -> dict[str, Any]:
-        report = build_report(state, llm)
+        report = build_report(state, llm, answer_model)
         tasks = state.get("subtasks") or []
         payload = {"tasks": [public_subtask(task) for task in tasks]} if tasks else {}
         return {
@@ -467,7 +480,7 @@ def public_evidence(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_report(state: AgentState, llm: DeepSeekClient) -> str:
+def build_report(state: AgentState, llm: DeepSeekClient, answer_model: AnswerModel | None = None) -> str:
     evidence = state.get("verified_evidence") or []
     conflicts = state.get("conflicts") or []
     decision = state.get("approval_decision", "not_required")
@@ -479,19 +492,35 @@ def build_report(state: AgentState, llm: DeepSeekClient) -> str:
     if plan.missing_information:
         return f"# 信息待补\n\n{plan.missing_information}"
 
-    subject = definition_subject(state["question"])
+    question = resolve_context(state["question"], state.get("context") or {})[0]
+    subject = definition_subject(question)
     if subject:
         for item in evidence:
             if item.get("kind") == "entity_definition":
                 return f"{item['summary']} [{item['index']}]"
-        if evidence:
-            entity = evidence[0]
+        general = explain_general(question, answer_model)
+        if general:
+            return general
+        entity = next((item for item in evidence if item.get("is_center")), None)
+        if entity:
             return f"图谱收录了「{entity['title']}」[{entity['index']}]。当前条目缺少可引用的释义。"
         return f"图谱暂未找到「{subject}」的可引用释义。"
 
-    ranked = sorted(evidence, key=lambda item: item.get("kind") != "document_excerpt")[:12]
-    selected = ranked[:8]
-    if ranked:
+    results = state.get("tool_results") or []
+    by_id = {item["id"]: item for item in evidence if item.get("id")}
+    sections = finding_lines(results, by_id)
+    if plan.task_type == "relation_path" and not sections:
+        left, right = plan.entities[:2] if len(plan.entities) == 2 else ("起点", "终点")
+        sections.append(f"现有图谱证据未能连起「{left}」和「{right}」的完整路径。")
+    if plan.task_type == "comparison" and not sections:
+        sections.append("目前缺少能完整对照两个对象的图谱证据。")
+
+    relevant = evidence if not sections else [item for item in evidence if item.get("kind") == "document_excerpt"]
+    ranked = sorted(relevant, key=lambda item: (
+        item.get("kind") not in {"document_excerpt", "entity_definition"}, not item.get("is_center"),
+    ))[:12]
+    selected = ranked[:3]
+    if ranked and not sections:
         candidates = {
             item["index"]: {
                 "title": str(item.get("title"))[:100], "excerpt": str(item.get("summary"))[:360],
@@ -499,36 +528,39 @@ def build_report(state: AgentState, llm: DeepSeekClient) -> str:
             for item in ranked
         }
         response = llm.json_completion(
-            REPORT_SYSTEM, json.dumps({"question": state["question"], "evidence": candidates}, ensure_ascii=False),
+            REPORT_SYSTEM, json.dumps({"question": question, "evidence": candidates}, ensure_ascii=False),
         )
         ids = response.get("evidence_ids") if isinstance(response, dict) else None
         if isinstance(ids, list):
             by_index = {item["index"]: item for item in ranked}
             valid_ids = list(dict.fromkeys(value for value in ids if type(value) is int and value in by_index))
-            selected = [by_index[value] for value in valid_ids[:8]] or selected
-    findings = [f"- {item.get('summary')} [{item['index']}]" for item in selected]
-    conflict_lines = [f"- {item['message']}" for item in conflicts] or ["- 当前自动检查未发现同字段的直接冲突；这不等于来源已完成专家复核。"]
-    results = state.get("tool_results") or []
+            selected = [by_index[value] for value in valid_ids[:3]] or selected
+    if selected:
+        sections.extend(f"- {evidence_line(item)}" for item in selected)
+    if not sections:
+        sections.append("目前未查到能回答这个问题的证据。")
     expected = state.get("primary_step_count", len(plan.steps))
-    successful = sum(result.get("outcome", "ok" if result["evidence_count"] else "empty") == "ok"
-                     for result in results[:expected])
     incomplete = [
-        f"- {result['step']['title']}。{result['detail']}"
+        f"- {result['detail']}"
         for result in results[:expected] if result.get("outcome") not in {None, "ok"}
     ]
     if len(results) < expected:
         incomplete.append("- 部分计划步骤受执行额度限制。")
-    progress = f"\n\n## 未完成步骤\n\n{chr(10).join(incomplete)}" if incomplete else ""
-    return (
-        "# 证据核验报告\n\n"
-        f"## 任务\n\n{state['question']}\n\n"
-        f"## 结论摘要\n\n原计划 {expected} 个步骤中，{successful} 个返回所需证据。"
-        f"汇总 {len(evidence)} 条不重复证据，证据覆盖为“{state.get('coverage', '不足')}”。"
-        "以下内容用于知识检索与初步筛查，不构成登记或合规终审。\n\n"
-        f"## 主要发现\n\n{chr(10).join(findings) if findings else '- 当前没有足够证据支持具体结论。'}{progress}\n\n"
-        f"## 差异与待核对项\n\n{chr(10).join(conflict_lines)}\n\n"
-        "## 下一步\n\n回到产品标签、登记主管部门原文或权威化学数据库核对关键字段；涉及实际使用或合规判断时由领域人员确认。"
-    )
+    if incomplete:
+        sections += ["## 这次未查清", *dict.fromkeys(incomplete)]
+    if conflicts:
+        sections += ["## 待核对差异", *(f"- {item['message']}" for item in conflicts)]
+    if plan.task_type == "compliance_screen":
+        sections.append("涉及实际使用时，请核对适用地区的现行登记文件和产品标签。")
+    return "\n\n".join(sections)
+
+
+def finding_lines(results: list[dict[str, Any]], by_id: dict[str, dict[str, Any]]) -> list[str]:
+    lines = []
+    for result in results:
+        if result.get("finding"):
+            lines.extend(render_finding(result["finding"], by_id))
+    return lines
 
 
 def build_subtask_report(state: AgentState) -> str:
@@ -536,19 +568,25 @@ def build_subtask_report(state: AgentState) -> str:
     complete = sum(task["status"] == "completed" for task in tasks)
     sections = [
         "# 多任务证据报告",
-        f"{complete}/{len(tasks)} 项取得完整结果，共尝试 {attempt_count(state)} 次受控工具调用。",
+        f"{complete}/{len(tasks)} 项取得完整结果。",
     ]
     numbered = {evidence_key(item): item for item in state.get("verified_evidence", [])}
+    by_id = {key: item for key, item in numbered.items() if isinstance(key, str)}
     for task in tasks:
         question = " ".join(task["question"].split())
         sections.append(f"## 第 {task['id']} 项 · {TASK_STATUS_LABELS[task['status']]}\n\n{question}")
+        results = [result for result in state.get("tool_results", []) if result.get("task_id") == task["id"]]
+        findings = finding_lines(results, by_id)
+        if findings:
+            sections.extend(findings)
         if task["message"]:
             sections.append(task["message"])
         keys = dict.fromkeys(evidence_key(item) for item in state.get("evidence", [])
                              if item.get("task_id") == task["id"])
         evidence = [numbered[key] for key in keys if key in numbered][:2]
-        if evidence:
-            sections.append("\n".join(f"- {item['summary']} [{item['index']}]" for item in evidence))
+        if evidence and not findings:
+            evidence.sort(key=lambda item: item.get("kind") not in {"document_excerpt", "entity_definition"})
+            sections.append("\n".join(f"- {evidence_line(item)}" for item in evidence))
     if state.get("conflicts"):
         sections.append("## 待核对差异\n\n" + "\n".join(f"- {item['message']}" for item in state["conflicts"]))
     return "\n\n".join(sections)

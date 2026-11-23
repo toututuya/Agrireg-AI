@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any, Protocol
 
+from .memory import MEMORY_REFERENCE, SLOTS, clean_subject, recovery_key
 from .models import PlanStep, TaskPlan
 from .task_queue import CLARIFICATION_SEPARATOR
 
@@ -35,7 +36,27 @@ DEFINITION_QUESTION = re.compile(
     r"(?:请问\s*)?(?:(?:什么是|何谓)\s*([^。！？?!，；;\n]{1,80})|"
     r"([^。！？?!，；;\n]{1,80})\s*(?:是什么|是啥|是什么意思))[\s。！？?!]*"
 )
-FOLLOWUP = re.compile(r"^(?:那[么，, ]*)?(?:它|该产品|这个产品|该成分|该对象|上一个)")
+QUOTED_ENTITY = re.compile(r"[‘’'\"“”]([^‘’'\"“”]{2,80})[‘’'\"“”]")
+COMPARISON_TERMS = re.compile(r"对比|比较|区别|差异|\bvs\b|与.+相比", re.I)
+PATH_TERMS = re.compile(r"路径|怎么关联|什么关系|关联链|关系链")
+FOLLOWUP = re.compile(
+    r"^(?:那[么，, ]*)?(?P<reference>它们|两者|它|该产品|这个产品|该成分|这个成分|该对象|"
+    r"这张证|该登记证|这个病害|该病害|这个作物|该作物|上一个对象|上一个)"
+)
+REFERENCE_KINDS = {
+    "该产品": {"Pesticide", "Registration", "RegisterNumber"},
+    "这个产品": {"Pesticide", "Registration", "RegisterNumber"},
+    "这个成分": {"ActiveSubstance", "ActiveIngredient"},
+    "该成分": {"ActiveSubstance", "ActiveIngredient"},
+    "这个病害": {"Disease"},
+    "该病害": {"Disease"},
+    "这个作物": {"Crop"},
+    "该作物": {"Crop"},
+}
+CURRENT_OVERRIDE = re.compile(
+    r"(?:^|[，,。\n])\s*(?:这次\s*)?(?:实际\s*)?(?:改查|只查|改用)\s*(.+)$", re.S
+)
+REFERENCE_ANSWER = re.compile(r"^(?:我指的是|我指|我是说|指的是|对象是|登记号是|登记号为)\s*")
 REGISTRATION_FIELD = r"(?:登记(?:证)?(?:编)?号|证号)"
 MIGRATION_REGISTRATION = r"(?:\d{2}[A-Z0-9]\d{3}-\d{2}|\d{4}(?:-\d{1,3})?)"
 NAMED_MIGRATION_REGISTRATION = re.compile(
@@ -99,6 +120,8 @@ def parse_plan(candidate: Any, question: str, documents_enabled: bool) -> TaskPl
                 return None
             if key in {"left", "right", "source", "target"} and value.strip().casefold() not in entities:
                 return None
+            if key in {"keyword", "name"} and value.strip().casefold() not in question.casefold():
+                return None
             if key == "registration_number" and value.strip() and value.strip().casefold() not in question.casefold():
                 return None
             step.arguments[key] = value.strip()
@@ -111,11 +134,12 @@ def build_plan(
     question: str, require_approval: bool, llm: PlannerModel,
     documents_enabled: bool = False, context: dict[str, Any] | None = None,
 ) -> TaskPlan:
-    recent = (context or {}).get("recent") or []
-    if FOLLOWUP.match(question) and recent:
-        entities = recent[-1]["entities"]
-        if len(entities) == 1:
-            question = FOLLOWUP.sub(entities[0], question, count=1)
+    question, conflict = resolve_context(question, context or {})
+    if conflict:
+        return TaskPlan(
+            task_type="fact_check", summary="确认本轮查询对象", missing_information=conflict,
+            requires_approval=require_approval,
+        )
     exact = plan_explicit_missing_registration(question, require_approval) if documents_enabled else None
     if exact is not None:
         return exact
@@ -125,7 +149,14 @@ def build_plan(
             task_type="fact_check", summary="查询图谱释义", entities=[subject], requires_approval=require_approval,
             steps=[PlanStep(id="definition", title="查找实体释义", tool="search_entity", arguments={"keyword": subject})],
         )
-    candidate = llm.json_completion(PLANNER_SYSTEM, planning_input(question, documents_enabled, context))
+    quoted = QUOTED_ENTITY.findall(question)
+    if (
+        len(quoted) == 2 and quoted[0].casefold() != quoted[1].casefold()
+        and PATH_TERMS.search(question) and not COMPARISON_TERMS.search(question)
+        and not COMPLIANCE_TERMS.search(question)
+    ):
+        return fallback_plan(question, require_approval, documents_enabled)
+    candidate = llm.json_completion(PLANNER_SYSTEM, planning_input(question, documents_enabled))
     plan = parse_plan(candidate, question, documents_enabled)
     if plan is None:
         return fallback_plan(question, require_approval, documents_enabled)
@@ -136,6 +167,59 @@ def build_plan(
                 step.arguments["registration_number"] = registration
     plan.requires_approval = plan.requires_approval or require_approval or needs_human_approval(question, plan)
     return plan
+
+
+def resolve_context(question: str, context: dict[str, Any]) -> tuple[str, str]:
+    original, *supplements = question.split(CLARIFICATION_SEPARATOR)
+    replacements = list(MEMORY_REFERENCE.finditer(original))
+    pronoun = FOLLOWUP.match(original)
+    if not replacements and not pronoun:
+        return question, ""
+    explicit = CURRENT_OVERRIDE.search(original)
+    if explicit and not MEMORY_REFERENCE.search(explicit[1]) and not FOLLOWUP.match(explicit[1]):
+        return explicit[1], ""
+
+    supplied = ""
+    if supplements:
+        latest = supplements[-1].strip().rstrip("。！？?!")
+        supplied = requested_document_registration(latest) or clean_subject(REFERENCE_ANSWER.sub("", latest))
+    if replacements:
+        slots = context.get("slots", {})
+        reg = requested_document_registration(original)
+        comparison = re.search(r"比较|对比|区别|路径|关系链", original)
+        ambiguous_slots = {SLOTS[match["slot"]] for match in replacements if not slots.get(SLOTS[match["slot"]])}
+        if len(ambiguous_slots) > 1:
+            return question, "请把本轮需要查询的对象和登记号分别写明。"
+        for match in replacements:
+            slot = SLOTS[match["slot"]]
+            if reg and slot == "登记号" and reg != slots.get(slot) and not comparison:
+                confirmed = supplied.upper()
+                if not (REGISTRATION.fullmatch(confirmed) or re.fullmatch(MIGRATION_REGISTRATION, confirmed)):
+                    return question, "本轮同时提到记住的登记号和新登记号。请补充这次要查的登记号。"
+                original = re.sub(re.escape(reg), lambda _: confirmed, original, flags=re.I)
+            if not (slots.get(slot) or supplied):
+                return question, f"本会话没有记住{slot}。请补充这次要查询的{slot}。"
+
+        def resolve_slot(match: re.Match) -> str:
+            slot = SLOTS[match["slot"]]
+            value = slots.get(slot) if slot != "登记号" and len(replacements) > 1 else supplied
+            value = value or slots.get(slot) or supplied
+            return f"登记号 {value}" if slot == "登记号" else value
+
+        original = MEMORY_REFERENCE.sub(resolve_slot, original)
+    if pronoun:
+        reference = supplied or context.get("reference", "")
+        mention = pronoun["reference"]
+        allowed_kinds = REFERENCE_KINDS.get(mention)
+        if (
+            not reference or mention in {"它们", "两者"} and not supplied
+            or allowed_kinds and not supplied and context.get("reference_kind") not in allowed_kinds
+            or mention in {"这张证", "该登记证"}
+            and not (REGISTRATION.fullmatch(reference) or re.fullmatch(MIGRATION_REGISTRATION, reference))
+        ):
+            return question, "请补充具体对象的名称或登记号，以便确定这次查询的是谁。"
+        original = FOLLOWUP.sub(lambda _: reference, original, count=1)
+    return original, ""
 
 
 def definition_subject(question: str) -> str:
@@ -180,8 +264,8 @@ def plan_explicit_missing_registration(question: str, require_approval: bool) ->
 def fallback_plan(question: str, require_approval: bool = False, documents_enabled: bool = False) -> TaskPlan:
     entities = extract_entities(question)
     compliance = bool(COMPLIANCE_TERMS.search(question))
-    comparison = bool(re.search(r"对比|比较|区别|差异|\bvs\b|与.+相比", question, re.I))
-    relation_path = bool(re.search(r"路径|怎么关联|什么关系|关联链|关系链", question, re.I))
+    comparison = bool(COMPARISON_TERMS.search(question))
+    relation_path = bool(PATH_TERMS.search(question))
     approval = require_approval or compliance
 
     if comparison:
@@ -225,7 +309,7 @@ def extract_entities(question: str) -> list[str]:
     segments = question.split(CLARIFICATION_SEPARATOR)
     if len(segments) > 1:
         return _unique([entity for segment in segments for entity in extract_entities(segment)])[:4]
-    quoted = re.findall(r"[‘’'\"“”]([^‘’'\"“”]{2,80})[‘’'\"“”]", question)
+    quoted = QUOTED_ENTITY.findall(question)
     if quoted:
         return _unique(quoted)[:4]
 
@@ -285,6 +369,7 @@ def document_step(question: str) -> PlanStep:
 
 def followup_steps(
     question: str, tool_results: list[dict[str, Any]], documents_enabled: bool, remaining: int,
+    procedures: dict[str, bool] | None = None,
 ) -> list[PlanStep]:
     if remaining < 1 or definition_subject(question):
         return []
@@ -292,28 +377,33 @@ def followup_steps(
         return step.tool, tuple(sorted((name, str(value).strip().casefold()) for name, value in step.arguments.items()))
 
     attempted = {signature(PlanStep.model_validate(item["step"])) for item in tool_results}
-    candidates: list[PlanStep] = []
+    candidates: list[tuple[str, str, PlanStep]] = []
     for item in tool_results:
         evidence_count = item.get("evidence_count", len(item.get("result", {}).get("evidence") or []))
-        if item.get("outcome", "ok" if evidence_count else "empty") == "ok":
+        outcome = item.get("outcome", "ok" if evidence_count else "empty")
+        if outcome == "ok":
             continue
         step = PlanStep.model_validate(item["step"])
         args = step.arguments
+        options = []
         if step.tool in {"find_relation_path", "compare_entities"}:
             for entity in args.values():
-                candidates.append(PlanStep(
+                options.append(PlanStep(
                     id="followup", title=f"补查单个图谱实体：{entity}", tool="search_entity",
                     arguments={"keyword": entity},
                 ))
         if step.tool in {"search_entity", "find_relation_path", "compare_entities"} and documents_enabled:
-            candidates.append(document_step(question))
+            options.append(document_step(question))
         if step.tool == "search_documents" and args.get("registration_number"):
-            candidates.append(PlanStep(
+            options.append(PlanStep(
                 id="followup", title="按登记号补查图谱", tool="search_entity",
                 arguments={"keyword": args["registration_number"]},
             ))
+        candidates.extend((step.tool, outcome, option) for option in options)
+    if procedures:
+        candidates.sort(key=lambda item: not procedures.get(recovery_key(item[0], item[1], item[2].tool)))
     result = []
-    for step in candidates:
+    for _, _, step in candidates:
         key = signature(step)
         if key not in attempted:
             attempted.add(key)

@@ -67,8 +67,11 @@ class CreateThreadRequest(BaseModel):
     title: str = Field("新分析任务", min_length=1, max_length=80)
 
 
-class StartRunRequest(BaseModel):
+class QuestionRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
+
+
+class StartRunRequest(QuestionRequest):
     require_approval: bool = False
 
 

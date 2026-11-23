@@ -8,14 +8,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .models import TaskPlan
+from .memory import MemoryCommand, utc_timestamp
+from .memory_store import backfill_memory, memory_reply, read_context, record_episode, setup_memory
 
 TERMINAL_STATUSES = {"completed", "failed", "rejected"}
 EVENT_PAGE_SIZE = 100
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return utc_timestamp(datetime.now(timezone.utc))
 
 
 class RunStore:
@@ -69,6 +70,8 @@ class RunStore:
                 CREATE INDEX IF NOT EXISTS idx_agent_events_run ON agent_events(run_id, seq);
                 """
             )
+            setup_memory(connection)
+            backfill_memory(connection)
 
     def _recover_active_runs(self) -> None:
         now = utc_now()
@@ -167,46 +170,33 @@ class RunStore:
 
     def planning_context(self, run_id: str, thread_id: str) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT r.question, (
-                    SELECT e.payload_json FROM agent_events e
-                    WHERE e.run_id = r.id AND e.kind = 'plan_ready'
-                    ORDER BY e.seq DESC LIMIT 1
-                ) AS planning_event
-                FROM agent_runs r
-                WHERE r.thread_id = ? AND r.id != ? AND r.status = 'completed'
-                  AND r.created_at <= (SELECT created_at FROM agent_runs WHERE id = ?)
-                ORDER BY r.created_at DESC LIMIT 12
-                """,
-                (thread_id, run_id, run_id),
-            ).fetchall()
-        if not rows:
-            return {}
-        turns = []
-        for row in rows:
-            event = json.loads(row["planning_event"] or "{}")
-            raw_plan = event.get("plan")
-            try:
-                plan = TaskPlan.model_validate(raw_plan)
-            except ValueError:
-                plan = None
-            turns.append({
-                "question": row["question"][:300],
-                "type": plan.task_type if plan else "",
-                "entities": [entity[:80] for entity in plan.entities]
-                if plan and not plan.missing_information and event.get("taskId") is None else [],
-            })
-        older = turns[3:]
-        return {
-            "summary": {
-                "entities": list(dict.fromkeys(entity for turn in older for entity in turn["entities"]))[:6],
-                "types": list(dict.fromkeys(turn["type"] for turn in older if turn["type"])),
-            },
-            "recent": list(reversed(turns[:3])),
-        }
+            run = connection.execute(
+                "SELECT * FROM agent_runs WHERE id = ? AND thread_id = ?", (run_id, thread_id)
+            ).fetchone()
+            if run is None:
+                raise KeyError("run_not_found")
+            return read_context(connection, run)
 
-    def update_run(self, run_id: str, status: str, **fields: Any) -> None:
+    def answer_memory(self, run_id: str, command: MemoryCommand) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise KeyError("run_not_found")
+            if run["status"] in TERMINAL_STATUSES:
+                return
+            now = utc_now()
+            report = memory_reply(connection, run, command, now)
+            connection.execute("""
+                UPDATE agent_runs SET status = 'completed', report = ?, error = NULL,
+                    interrupt_json = NULL, updated_at = ? WHERE id = ?
+            """, (report, now, run_id))
+            connection.execute("""
+                INSERT INTO agent_events(run_id, kind, title, detail, payload_json, created_at)
+                VALUES (?, 'memory_answered', '会话记忆', ?, ?, ?)
+            """, (run_id, "已处理本会话的记忆请求。", json.dumps({"kind": command.kind}), now))
+
+    def update_run(self, run_id: str, status: str, *, episode: dict[str, Any] | None = None, **fields: Any) -> None:
         allowed = {"interrupt_json", "report", "error"}
         updates = {key: value for key, value in fields.items() if key in allowed}
         updates["status"] = status
@@ -214,7 +204,13 @@ class RunStore:
         assignments = ", ".join(f"{key} = ?" for key in updates)
         values = list(updates.values()) + [run_id]
         with self._lock, self._connect() as connection:
-            connection.execute(f"UPDATE agent_runs SET {assignments} WHERE id = ?", values)
+            cursor = connection.execute(
+                f"""UPDATE agent_runs SET {assignments} WHERE id = ?
+                    AND status NOT IN ('completed', 'failed', 'rejected')""", values
+            )
+            if cursor.rowcount and status in TERMINAL_STATUSES:
+                row = connection.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+                record_episode(connection, row, updates["updated_at"], episode)
 
     def claim_resume(self, run_id: str) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
