@@ -1,14 +1,11 @@
 <template>
   <section class="graph-page">
-    <header class="page-intro">
+    <header class="view-heading">
       <div>
-        <p><i aria-hidden="true"></i> AGRIREG GRAPH EXPLORER</p>
-        <div class="intro-title">
-          <h1>全球农药关联图谱</h1>
-          <span>从任意实体出发，穿透登记、作物、病虫害、有效成分与作用机制。</span>
-        </div>
+        <h1>知识图谱</h1>
+        <p>从登记号、作物或有效成分出发，查看它们的关联和登记依据。</p>
       </div>
-      <div class="mode-switch" aria-label="图谱查询模式">
+      <div class="mode-switch" role="group" aria-label="图谱查询模式">
         <button
           type="button"
           :class="{ active: mode === 'entity' }"
@@ -31,36 +28,40 @@
     </header>
 
     <section class="query-dock" aria-label="图谱查询">
-    <form v-if="mode === 'entity'" class="search-bar" @submit.prevent="searchGraph">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-      <label class="sr-only" for="graph-keyword">搜索知识图谱实体</label>
-      <input
-        id="graph-keyword"
-        name="graph-keyword"
-        type="search"
-        v-model.trim="keyword"
-        maxlength="80"
-        autocomplete="off"
-        placeholder="搜索农药、作物、病虫害、有效成分或登记号…"
-      >
-      <button type="submit" :disabled="loading || !keyword">{{ loading ? '正在探索…' : '探索关系' }}</button>
+    <form v-if="mode === 'entity'" class="search-bar" role="search" aria-label="登记实体检索" @submit.prevent="searchGraph">
+      <label for="graph-keyword">检索登记实体</label>
+      <div class="search-field">
+        <UiIcon name="search" />
+        <input
+          id="graph-keyword"
+          name="graph-keyword"
+          type="search"
+          v-model.trim="keyword"
+          maxlength="80"
+          autocomplete="off"
+          class="ui-input"
+          required
+          placeholder="输入登记号、有效成分或作物"
+        >
+        <button class="ui-button primary" type="submit" :disabled="loading">{{ loading ? '正在检索…' : '检索实体' }}</button>
+      </div>
     </form>
 
     <form v-else-if="mode === 'path'" class="path-search" @submit.prevent="searchPath">
       <div class="path-explainer">
-        <strong>它解决什么？</strong>
-        <span>输入任意两个实体，查找连接它们的最短证据链，说明中间经过哪些登记、成分、作物或病虫害。</span>
+        <strong>查询最短关系路径</strong>
+        <span>输入两个实体，查看它们经过哪些登记、成分、作物或病虫害发生关联。</span>
       </div>
       <div>
         <label for="path-source">从哪个实体出发</label>
-        <input id="path-source" name="path-source" v-model.trim="pathStart" maxlength="80" autocomplete="off" placeholder="例如 Prothioconazole…">
+        <input id="path-source" name="path-source" class="ui-input" required v-model.trim="pathStart" maxlength="80" autocomplete="off" placeholder="例如 Prothioconazole…">
       </div>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16m-5-5 5 5-5 5"/></svg>
       <div>
         <label for="path-target">想关联到哪个实体</label>
-        <input id="path-target" name="path-target" v-model.trim="pathEnd" maxlength="80" autocomplete="off" placeholder="例如 Spring barley…">
+        <input id="path-target" name="path-target" class="ui-input" required v-model.trim="pathEnd" maxlength="80" autocomplete="off" placeholder="例如 Spring barley…">
       </div>
-      <button type="submit" :disabled="loading || !pathStart || !pathEnd">解释两者关系</button>
+      <button class="ui-button primary" type="submit" :disabled="loading">{{ loading ? '正在查询…' : '解释两者关系' }}</button>
     </form>
 
     <form v-else class="compare-search" @submit.prevent="compareProducts">
@@ -70,49 +71,50 @@
       </div>
       <div>
         <label for="compare-left">产品 A</label>
-        <input id="compare-left" name="compare-left" v-model.trim="compareLeftKeyword" maxlength="80" autocomplete="off" placeholder="登记号或产品名…">
+        <input id="compare-left" name="compare-left" class="ui-input" required v-model.trim="compareLeftKeyword" maxlength="80" autocomplete="off" placeholder="登记号或产品名…">
       </div>
-      <button type="button" class="swap-products" aria-label="交换两个产品" title="交换产品" @click="swapProducts">
+      <button type="button" class="ui-button swap-products" aria-label="交换两个产品" title="交换产品" :disabled="compareLoading" @click="swapProducts">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 3-3 3 3M10 4v14m7-1-3 3-3-3m3 3V6"/></svg>
       </button>
       <div>
         <label for="compare-right">产品 B</label>
-        <input id="compare-right" name="compare-right" v-model.trim="compareRightKeyword" maxlength="80" autocomplete="off" placeholder="登记号或产品名…">
+        <input id="compare-right" name="compare-right" class="ui-input" required v-model.trim="compareRightKeyword" maxlength="80" autocomplete="off" placeholder="登记号或产品名…">
       </div>
-      <button type="submit" :disabled="compareLoading || !compareLeftKeyword || !compareRightKeyword">
+      <button class="ui-button primary" type="submit" :disabled="compareLoading">
         {{ compareLoading ? '正在对比…' : '生成对比' }}
       </button>
     </form>
 
-    <div v-if="mode === 'entity' && !graphData.found" class="sample-row" aria-label="搜索示例">
-      <span>业务视角</span>
+    <div v-if="mode === 'entity'" class="sample-row" aria-label="搜索示例">
+      <span>检索示例</span>
       <button
         v-for="sample in samples"
         :key="sample.label"
         type="button"
+        :disabled="loading"
         @click="runSample(sample.keyword)"
       >{{ sample.label }}</button>
     </div>
-    <div v-else-if="mode === 'path' && !graphData.found" class="sample-row" aria-label="路径查询示例">
+    <div v-else-if="mode === 'path'" class="sample-row" aria-label="路径查询示例">
       <span>穿透示例</span>
-      <button type="button" @click="runPathSample('Prothioconazole', 'Spring barley')">有效成分为何关联作物？</button>
-      <button type="button" @click="runPathSample('Leaf spot disease', '4387-901')">病害如何关联登记产品？</button>
+      <button type="button" :disabled="loading" @click="runPathSample('Prothioconazole', 'Spring barley')">有效成分为何关联作物？</button>
+      <button type="button" :disabled="loading" @click="runPathSample('Leaf spot disease', '4387-901')">病害如何关联登记产品？</button>
     </div>
-    <div v-else-if="mode === 'compare' && !comparison" class="sample-row" aria-label="产品对比示例">
+    <div v-else-if="mode === 'compare'" class="sample-row" aria-label="产品对比示例">
       <span>对比示例</span>
-      <button type="button" @click="runCompareSample('PD20150720', 'PD20050020')">两种杀虫剂登记差异</button>
+      <button type="button" :disabled="compareLoading" @click="runCompareSample('PD20150720', 'PD20050020')">两种杀虫剂登记差异</button>
     </div>
     </section>
 
-    <section v-if="mode === 'compare'" class="compare-workspace" aria-live="polite">
+    <section v-if="mode === 'compare'" class="compare-workspace" aria-label="产品对比结果" :aria-busy="String(compareLoading)">
       <div v-if="compareLoading" class="compare-state" role="status">
-        <span class="loader"></span>
+        <span class="ui-skeleton" aria-hidden="true"></span>
         <strong>正在汇总两个产品的登记关系…</strong>
       </div>
       <div v-else-if="compareError" class="compare-state error-state" role="alert">
         <strong>无法生成对比</strong>
         <p>{{ compareError }}</p>
-        <button type="button" @click="compareProducts">重新查询</button>
+        <button class="ui-button" type="button" @click="compareProducts">重新查询</button>
       </div>
       <template v-else-if="comparison">
         <header class="comparison-header">
@@ -120,7 +122,7 @@
             <span>产品 A · {{ comparison.left.dataset }}</span>
             <h2>{{ comparison.left.name }}</h2>
             <p>{{ productSubtitle(comparison.left) }}</p>
-            <button type="button" @click="openComparedProduct(comparison.left.name)">在图谱中查看</button>
+            <button type="button" class="ui-button" @click="openComparedProduct(comparison.left.name)">在图谱中查看</button>
           </div>
           <div class="comparison-score" aria-label="对比摘要">
             <strong>{{ comparisonSharedCount }}</strong>
@@ -131,39 +133,45 @@
             <span>产品 B · {{ comparison.right.dataset }}</span>
             <h2>{{ comparison.right.name }}</h2>
             <p>{{ productSubtitle(comparison.right) }}</p>
-            <button type="button" @click="openComparedProduct(comparison.right.name)">在图谱中查看</button>
+            <button type="button" class="ui-button" @click="openComparedProduct(comparison.right.name)">在图谱中查看</button>
           </div>
         </header>
 
         <div class="comparison-actions">
-          <button type="button" @click="askAboutComparison">让 AI 解释差异</button>
-          <button type="button" @click="exportComparison">导出对比结果</button>
+          <button type="button" class="ui-button primary" @click="askAboutComparison">让 AI 解释差异</button>
+          <button type="button" class="ui-button" @click="exportComparison">导出对比结果</button>
         </div>
 
         <section class="comparison-block">
           <div class="comparison-title">
-            <div><span>登记字段</span><h3>关键属性逐项核对</h3></div>
+            <h3>登记属性</h3>
             <p>“不同”只表示当前图谱字段值不同，不推断产品优劣。</p>
           </div>
-          <div class="comparison-table" role="table" aria-label="产品登记属性对比">
-            <div class="comparison-row heading" role="row">
-              <span role="columnheader">字段</span>
-              <span role="columnheader">{{ comparison.left.name }}</span>
-              <span role="columnheader">{{ comparison.right.name }}</span>
-              <span role="columnheader">结果</span>
-            </div>
-            <div v-for="row in comparisonPropertyRows" :key="row.key" class="comparison-row" role="row">
-              <strong role="cell">{{ row.label }}</strong>
-              <span role="cell">{{ row.left || '暂无数据' }}</span>
-              <span role="cell">{{ row.right || '暂无数据' }}</span>
-              <em role="cell" :class="{ same: row.same }">{{ row.same ? '相同' : '不同' }}</em>
-            </div>
+          <div class="comparison-table" tabindex="0" role="region" aria-label="产品登记属性对比">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">字段</th>
+                  <th scope="col">{{ comparison.left.name }}</th>
+                  <th scope="col">{{ comparison.right.name }}</th>
+                  <th scope="col">结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in comparisonPropertyRows" :key="row.key">
+                  <th scope="row">{{ row.label }}</th>
+                  <td>{{ row.left || '暂无数据' }}</td>
+                  <td>{{ row.right || '暂无数据' }}</td>
+                  <td><span class="difference" :class="{ same: row.same }">{{ row.same ? '相同' : '不同' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
         <section class="comparison-block relation-comparison">
           <div class="comparison-title">
-            <div><span>关系网络</span><h3>共同关联与各自关联</h3></div>
+            <h3>共同关联与各自关联</h3>
             <p>直接来自两个登记产品的一跳图谱关系。</p>
           </div>
           <article v-for="section in comparisonRelationSections" :key="section.label">
@@ -199,12 +207,12 @@
       class="workspace"
       :class="{ 'filter-collapsed': !showFilters, 'detail-collapsed': !showDetails }"
     >
-      <aside v-show="showFilters" class="filter-panel" aria-label="图谱筛选">
+      <aside v-show="showFilters" id="graph-filters" class="filter-panel" aria-label="图谱筛选">
         <div class="panel-heading">
           <span>视图筛选</span>
           <div>
             <button v-if="typeOptions.length" type="button" @click="showAllTypes">全部显示</button>
-            <button type="button" aria-label="收起视图筛选" title="收起筛选" @click="togglePanel('filter')">‹</button>
+            <button type="button" aria-label="收起视图筛选" title="收起筛选" @click="closePanel('filter')">×</button>
           </div>
         </div>
 
@@ -232,25 +240,26 @@
             <strong>{{ formatCount(item.value) }}</strong>
             <span>{{ item.label }}</span>
           </div>
-          <p>全球登记关联网络</p>
+          <p>图谱数据覆盖</p>
         </section>
 
-        <section id="graph-interaction-help" class="interaction-help">
+        <section class="interaction-help">
           <p>画布操作</p>
           <dl>
             <div><dt>拖动</dt><dd>调整节点位置</dd></div>
             <div><dt>滚轮</dt><dd>缩放关系网络</dd></div>
-            <div><dt>双击 / 按钮</dt><dd>增量展开实体</dd></div>
+            <div><dt>双击 / 按钮</dt><dd>展开直接关联</dd></div>
+            <div><dt>Tab / Enter</dt><dd>选择节点</dd></div>
           </dl>
         </section>
       </aside>
 
-      <main class="network-panel">
+      <section ref="networkPanel" class="network-panel" aria-label="知识图谱画布">
+        <p id="graph-interaction-help" class="sr-only">使用 Tab 在节点之间切换，按回车选中。方向键平移，加号和减号缩放，数字 0 适配画布。</p>
         <div class="network-toolbar">
-          <div class="result-summary" :class="{ 'path-result': mode === 'path' && graphData.found }">
+          <div class="result-summary" role="status" :class="{ 'path-result': mode === 'path' && graphData.found }">
             <template v-if="mode === 'path' && graphData.found">
-              <span class="result-eyebrow">最短关系路径</span>
-              <strong>{{ resultTitle }}</strong>
+              <h2>{{ resultTitle }}</h2>
               <p>{{ pathNarrative }}</p>
               <ol aria-label="关系路径步骤">
                 <li v-for="step in pathSteps" :key="step.key">
@@ -262,32 +271,35 @@
               <span class="result-metrics">{{ visibleNodeCount }} 个实体 · {{ visibleEdgeCount }} 条关系</span>
             </template>
             <template v-else>
-              <strong>{{ resultTitle }}</strong>
-              <span v-if="graphData.found">{{ visibleNodeCount }} 个实体 · {{ visibleEdgeCount }} 条关系</span>
-              <span v-else>搜索后将在这里展开关系</span>
+              <h2>{{ resultTitle }}</h2>
+              <span v-if="graphData.found && !loading">{{ visibleNodeCount }} 个实体 · {{ visibleEdgeCount }} 条关系</span>
             </template>
           </div>
-          <div class="tool-actions" aria-label="图谱视图工具">
+          <div class="tool-actions" role="group" aria-label="图谱视图工具">
             <button
               type="button"
+              ref="filterToggle"
               title="切换筛选栏"
-              aria-label="切换筛选栏"
-              :aria-pressed="showFilters ? 'true' : 'false'"
+              aria-controls="graph-filters"
+              :aria-expanded="String(showFilters)"
               @click="togglePanel('filter')"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M7 12h10m-7 7h4"/></svg>
+              筛选
             </button>
-            <button type="button" title="缩小" aria-label="缩小关系图" @click="zoomBy(.82)">−</button>
+            <button type="button" title="缩小" aria-label="缩小关系图" :disabled="loading || !graphData.found" @click="zoomBy(.82)">−</button>
             <span>{{ Math.round(zoom * 100) }}%</span>
-            <button type="button" title="放大" aria-label="放大关系图" @click="zoomBy(1.22)">＋</button>
-            <button type="button" title="适合画布" aria-label="让图谱适合画布" @click="fitView">
+            <button type="button" title="放大" aria-label="放大关系图" :disabled="loading || !graphData.found" @click="zoomBy(1.22)">＋</button>
+            <button type="button" title="适合画布" aria-label="让图谱适合画布" :disabled="loading || !graphData.found" @click="fitView()">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
             </button>
-            <button type="button" title="重新布局" aria-label="重新布局关系图" @click="runLayout(true)">
+            <button type="button" title="重新布局" aria-label="重新布局关系图" :disabled="loading || !graphData.found" @click="runLayout(true)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6M20 20v-6h-6M5 9a8 8 0 0 1 13-3l2 2M19 15a8 8 0 0 1-13 3l-2-2"/></svg>
             </button>
-            <button type="button" title="全屏查看" aria-label="全屏查看关系图" @click="toggleFullscreen">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+            <button v-if="fullscreenSupported" type="button" :title="fullscreen ? '退出全屏' : '全屏查看'"
+              :aria-label="fullscreen ? '退出图谱全屏' : '全屏查看关系图'"
+              :disabled="loading || !graphData.found" @click="toggleFullscreen">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="fullscreen ? 'M3 8h5V3m13 5h-5V3M3 16h5v5m13-5h-5v5' : 'M3 9V3h6m6 0h6v6M3 15v6h6m6 0h6v-6'"/></svg>
             </button>
             <button
               type="button"
@@ -300,12 +312,15 @@
             </button>
             <button
               type="button"
+              class="detail-toggle"
+              ref="detailToggle"
               title="切换实体详情"
-              aria-label="切换实体详情"
-              :aria-pressed="showDetails ? 'true' : 'false'"
+              aria-controls="graph-details"
+              :aria-expanded="String(showDetails)"
               @click="togglePanel('detail')"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 8h6m-6 4h6m-6 4h4"/></svg>
+              详情
             </button>
           </div>
         </div>
@@ -313,20 +328,25 @@
         <section v-if="evidenceHighlight" class="evidence-highlight-banner" aria-live="polite">
           <div>
             <span>AI 回答依据 [{{ evidenceHighlight.index || 1 }}]</span>
-            <strong>{{ evidenceHighlight.sourceName }} — {{ relationName(evidenceHighlight.relation) }} — {{ evidenceHighlight.targetName }}</strong>
+            <strong>{{ evidenceHighlight.sourceName }} · {{ relationName(evidenceHighlight.relation) }} · {{ evidenceHighlight.targetName }}</strong>
           </div>
           <button type="button" aria-label="关闭证据高亮" @click="clearEvidenceHighlight">关闭高亮</button>
         </section>
 
-        <div ref="graphStage" class="graph-stage">
+        <button v-if="selectedNode && showDetails && !fullscreen" class="graph-skip sr-only" type="button" @click="focusDetails">
+          跳到实体详情
+        </button>
+        <div ref="graphStage" class="graph-stage" :aria-busy="String(loading)">
           <div class="network-grid" aria-hidden="true"></div>
           <svg
-            v-if="graphData.found"
+            v-if="graphData.found && !loading"
             ref="cyCanvas"
+            role="group"
             class="cy-canvas"
             aria-label="可拖动和缩放的农药知识图谱"
             aria-describedby="graph-interaction-help"
-            @wheel.prevent="handleWheel"
+            @wheel="handleWheel"
+            @keydown="handleCanvasKeydown"
             @pointerdown="startPan"
             @pointermove="handlePointerMove"
             @pointerup="endPointerAction"
@@ -339,10 +359,6 @@
               <clipPath id="graph-node-image-clip-sm">
                 <circle cx="0" cy="0" r="29"></circle>
               </clipPath>
-              <filter id="graph-node-glow" x="-80%" y="-80%" width="260%" height="260%">
-                <feGaussianBlur stdDeviation="7" result="blur"></feGaussianBlur>
-                <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
-              </filter>
               <marker id="graph-edge-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z"></path>
               </marker>
@@ -367,8 +383,8 @@
                 <line
                   :x1="nodePosition(edge.source).x"
                   :y1="nodePosition(edge.source).y"
-                  :x2="nodePosition(edge.target).x"
-                  :y2="nodePosition(edge.target).y"
+                  :x2="edgeEndpoint(edge).x"
+                  :y2="edgeEndpoint(edge).y"
                   marker-end="url(#graph-edge-arrow)"
                 ></line>
                 <title>{{ relationName(edge.type) }}</title>
@@ -380,13 +396,10 @@
               </g>
 
               <g
-                v-for="(node, nodeIndex) in visibleNodes"
+                v-for="node in visibleNodes"
                 :key="String(node.id)"
                 class="svg-node"
-                :style="{
-                  '--node-delay': `${Math.min(nodeIndex, 18) * 28}ms`,
-                  '--node-color': typeColor(node.label)
-                }"
+                :style="{ '--node-color': typeColor(node.label) }"
                 :class="{
                   center: node.center,
                   selected: selectedNode && String(selectedNode.id) === String(node.id),
@@ -397,6 +410,7 @@
                 role="button"
                 tabindex="0"
                 :aria-label="`${labelName(node.label)}：${node.name}`"
+                :aria-pressed="String(selectedNode && String(selectedNode.id) === String(node.id) || false)"
                 @pointerdown.stop="startNodeDrag(node, $event)"
                 @click.stop="selectNode(node)"
                 @dblclick.stop="exploreNode(node.id)"
@@ -419,9 +433,14 @@
                 <circle
                   class="node-core"
                   :r="node.center ? 46 : 31"
-                  :fill="node.center ? '#121936' : nodeFill(node.label)"
+                  :fill="nodeFill(node.label)"
                   :stroke="typeColor(node.label)"
                 ></circle>
+                <text
+                  aria-hidden="true"
+                  class="node-glyph"
+                  :fill="typeColor(node.label)"
+                >{{ nodeGlyph(node.label) }}</text>
                 <image
                   v-if="isHttpUrl(node.imageUrl)"
                   aria-hidden="true"
@@ -433,11 +452,6 @@
                   preserveAspectRatio="xMidYMid slice"
                   :clip-path="node.center ? 'url(#graph-node-image-clip-lg)' : 'url(#graph-node-image-clip-sm)'"
                 ></image>
-                <text
-                  v-else
-                  class="node-glyph"
-                  :fill="typeColor(node.label)"
-                >{{ nodeGlyph(node.label) }}</text>
                 <rect
                   class="node-label-bg"
                   :x="-nodeLabelWidth(node) / 2"
@@ -459,7 +473,7 @@
           </svg>
 
           <div v-if="loading" class="canvas-state" role="status" aria-live="polite">
-            <span class="loader"></span>
+            <span class="ui-skeleton" aria-hidden="true"></span>
             <h2>{{ mode === 'path' ? '正在解释关系链…' : '正在加载关系网络…' }}</h2>
           </div>
 
@@ -467,17 +481,17 @@
             <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 5 5 40h38L24 5Zm0 13v10m0 6v.01"/></svg>
             <h2>暂时没有加载成功</h2>
             <p>{{ errorMessage }}</p>
-            <button type="button" @click="retrySearch">再试一次</button>
+            <button class="ui-button" type="button" @click="retrySearch">再试一次</button>
           </div>
 
-          <div v-else-if="searched && !graphData.found" class="canvas-state">
+          <div v-else-if="searched && !graphData.found" class="canvas-state" role="status">
             <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="21" cy="21" r="13"/><path d="m42 42-12-12M15 21h12"/></svg>
             <h2>{{ mode === 'path' ? '没有找到关系链' : '没有找到这个实体' }}</h2>
             <p>{{ mode === 'path' ? '可以换用更准确的起点和终点名称。' : '可以换一个名称，或从上方示例开始探索。' }}</p>
           </div>
 
           <div v-else-if="!graphData.found" class="canvas-state">
-            <div class="seed-graph" aria-hidden="true"><i></i><i></i><i></i><i></i><strong>KG</strong></div>
+            <UiIcon name="graph" />
             <h2>搜索一个实体，展开关系网络</h2>
             <p>农药、作物、病虫害与有效成分都可以成为探索起点。</p>
           </div>
@@ -494,19 +508,23 @@
             {{ expandingNodeId ? '正在添加关联实体…' : statusMessage }}
           </div>
         </div>
-      </main>
+        <button v-if="selectedNode && !loading" type="button" ref="jumpDetail" class="jump-detail ui-button" @click="focusDetails">
+          查看 {{ selectedNode.name }} 的详情 <UiIcon name="chevron" />
+        </button>
+      </section>
 
-      <aside v-show="showDetails" class="detail-panel" aria-label="实体详情">
+      <aside v-show="showDetails" ref="details" id="graph-details" class="detail-panel" aria-label="实体详情" tabindex="-1">
         <div class="panel-heading detail-heading">
           <span>实体详情</span>
           <div>
             <i v-if="selectedNode" :style="{ background: typeColor(selectedNode.label) }"></i>
-            <button type="button" aria-label="收起实体详情" title="收起详情" @click="togglePanel('detail')">×</button>
+            <button type="button" aria-label="收起实体详情" title="收起详情" @click="closePanel('detail')">×</button>
           </div>
         </div>
 
-        <template v-if="selectedNode">
-          <div class="entity-summary" :class="{ 'without-image': !selectedImageUrl || detailImageError }">
+        <div v-if="loading" class="detail-empty" role="status"><span class="ui-skeleton" aria-hidden="true"></span><p>正在载入实体详情…</p></div>
+        <template v-else-if="selectedNode">
+          <div class="entity-summary">
             <div v-if="selectedImageUrl && !detailImageError" class="entity-image">
               <img
                 :src="selectedImageUrl"
@@ -524,27 +542,27 @@
           </div>
 
           <div class="entity-actions">
-            <button type="button" :disabled="loading || !!expandingNodeId" @click="exploreNode(selectedNode.id)">
+            <button class="ui-button primary" type="button" :disabled="loading || !!expandingNodeId" @click="exploreNode(selectedNode.id)">
               {{ expandingNodeId === String(selectedNode.id)
                 ? '正在展开…'
                 : (expandedNodeIds.includes(String(selectedNode.id)) ? '查看已展开关系' : '展开关系') }}
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
             </button>
-            <button type="button" @click="askAboutNode(selectedNode.name)">
+            <button class="ui-button" type="button" @click="askAboutNode(selectedNode.name)">
               问 AI
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H9l-4 3V5Z"/></svg>
             </button>
           </div>
 
-          <div class="detail-tabs" role="tablist" aria-label="实体详情分类">
+          <div class="detail-tabs" role="tablist" aria-label="实体详情分类" @keydown="handleDetailTabKeydown">
             <button
               id="detail-relations-tab"
               type="button"
               role="tab"
               :aria-selected="detailTab === 'relations' ? 'true' : 'false'"
               :aria-controls="'detail-relations-panel'"
+              :tabindex="detailTab === 'relations' ? 0 : -1"
               :class="{ active: detailTab === 'relations' }"
-              :disabled="!selectedRelations.length"
               @click="detailTab = 'relations'"
             >
               直接关联 <span>{{ selectedRelations.length }}</span>
@@ -555,6 +573,7 @@
               role="tab"
               :aria-selected="detailTab === 'properties' ? 'true' : 'false'"
               :aria-controls="'detail-properties-panel'"
+              :tabindex="detailTab === 'properties' ? 0 : -1"
               :class="{ active: detailTab === 'properties' }"
               @click="detailTab = 'properties'"
             >
@@ -566,8 +585,8 @@
               role="tab"
               :aria-selected="detailTab === 'evidence' ? 'true' : 'false'"
               :aria-controls="'detail-evidence-panel'"
+              :tabindex="detailTab === 'evidence' ? 0 : -1"
               :class="{ active: detailTab === 'evidence' }"
-              :disabled="!evidenceAvailable"
               @click="detailTab = 'evidence'"
             >
               登记证据
@@ -580,6 +599,7 @@
               id="detail-relations-panel"
               class="relation-list"
               role="tabpanel"
+              tabindex="0"
               aria-labelledby="detail-relations-tab"
             >
               <button
@@ -599,6 +619,7 @@
               id="detail-properties-panel"
               class="property-list"
               role="tabpanel"
+              tabindex="0"
               aria-labelledby="detail-properties-tab"
             >
               <dl v-if="propertyEntries.length">
@@ -626,11 +647,12 @@
               id="detail-evidence-panel"
               class="evidence-panel"
               role="tabpanel"
+              tabindex="0"
               aria-labelledby="detail-evidence-tab"
             >
+              <template v-if="evidenceAvailable">
               <div class="evidence-status">
-                <span>全球登记记录</span>
-                <strong>{{ selectedEvidence.dataset || '全球农药登记字段集' }}</strong>
+                <strong>{{ selectedEvidence.dataset || '农药登记记录' }}</strong>
               </div>
               <dl v-if="evidenceEntries.length">
                 <div v-for="entry in evidenceEntries" :key="entry.key">
@@ -639,12 +661,15 @@
                 </div>
               </dl>
               <a
-                v-if="selectedEvidence.sourceUrl"
+                v-if="isHttpUrl(selectedEvidence.sourceUrl)"
+                class="ui-link"
                 :href="selectedEvidence.sourceUrl"
                 target="_blank"
                 rel="noopener"
               >查看原始登记资料 ↗</a>
-              <p v-else>该记录已纳入全球登记关联网络。</p>
+              <p v-else>暂无原始登记资料链接。</p>
+              </template>
+              <p v-else class="no-properties">此实体没有登记记录。可以沿直接关联查看登记产品。</p>
             </section>
           </div>
         </template>
@@ -660,6 +685,7 @@
 
 <script>
 import service from '@/utils/axios';
+import UiIcon from '@/components/UiIcon.vue';
 
 const EMPTY_GRAPH = () => ({
   found: false,
@@ -674,6 +700,7 @@ const MAX_GRAPH_EDGES = 280;
 
 export default {
   name: 'GraphView',
+  components: { UiIcon },
   data() {
     return {
       mode: 'entity',
@@ -686,9 +713,9 @@ export default {
       compareError: '',
       comparison: null,
       samples: [
-        { label: '有效成分全景', keyword: 'Chlorantraniliprole' },
-        { label: '作物—病虫害—登记产品', keyword: 'Spring barley' },
-        { label: '登记产品穿透', keyword: 'PD20150720' }
+        { label: '有效成分', keyword: 'Chlorantraniliprole' },
+        { label: '作物关联', keyword: 'Spring barley' },
+        { label: 'PD20150720', keyword: 'PD20150720' }
       ],
       loading: false,
       graphRequestId: 0,
@@ -698,6 +725,8 @@ export default {
       statusMessage: '',
       statusError: false,
       zoom: 1,
+      fullscreen: false,
+      fullscreenSupported: Boolean(document.fullscreenEnabled),
       showFilters: false,
       showDetails: true,
       activeTypes: [],
@@ -721,14 +750,14 @@ export default {
       renderFrame: null,
       statusTimer: null,
       labelColors: {
-        RegisterNumber: '#7695ff',
-        Crop: '#79c8a3',
-        Disease: '#ff987a',
-        ActiveSubstance: '#64c5d5',
-        ChemicalClasses: '#ad8cf0',
-        PesticideCategory: '#f0c36b',
-        TargetSite: '#eb8bb5',
-        ModeOfAction: '#83beb8'
+        RegisterNumber: '#475e8f',
+        Crop: '#386644',
+        Disease: '#8c492f',
+        ActiveSubstance: '#286660',
+        ChemicalClasses: '#67507c',
+        PesticideCategory: '#796018',
+        TargetSite: '#854666',
+        ModeOfAction: '#396872'
       },
       labelFills: {
         RegisterNumber: '#e8edff',
@@ -993,41 +1022,63 @@ export default {
   watch: {
     '$route.query': {
       deep: true,
-      async handler(query) {
-        if (!query.q) return;
-        const keyword = String(query.q);
-        if (keyword !== this.keyword || this.mode !== 'entity') {
-          this.switchMode('entity');
-          this.keyword = keyword;
-          await this.searchGraph();
-        }
-        await this.applyEvidenceFromRoute();
+      handler(query) {
+        this.loadGraphRoute(query);
       }
     },
     selectedNode() {
       this.detailImageError = false;
       this.expandedPropertyKeys = [];
       this.$nextTick(() => {
-        this.detailTab = this.selectedRelations.length ? 'relations' : 'properties';
+        this.detailTab = this.selectedNode?.label === 'RegisterNumber'
+          ? 'evidence'
+          : (this.selectedRelations.length ? 'relations' : 'properties');
       });
     }
   },
   async mounted() {
-    if (this.$route.query.q) this.keyword = String(this.$route.query.q);
+    document.title = '知识图谱 · AgriReg AI';
+    window.addEventListener('resize', this.handleCanvasResize);
+    document.addEventListener('fullscreenchange', this.handleFullscreenChange);
     this.loadGraphStats();
-    await this.searchGraph();
-    await this.applyEvidenceFromRoute();
+    if (!await this.loadGraphRoute(this.$route.query)) await this.searchGraph();
   },
   beforeDestroy() {
+    window.removeEventListener('resize', this.handleCanvasResize);
+    document.removeEventListener('fullscreenchange', this.handleFullscreenChange);
     if (this.renderFrame) window.cancelAnimationFrame(this.renderFrame);
     if (this.statusTimer) window.clearTimeout(this.statusTimer);
   },
   methods: {
+    async loadGraphRoute(query) {
+      const { pathStart, pathEnd } = query;
+      if (typeof pathStart === 'string' && pathStart.trim() && pathStart.length <= 80
+          && typeof pathEnd === 'string' && pathEnd.trim() && pathEnd.length <= 80) {
+        if (this.mode !== 'path' || pathStart !== this.pathStart || pathEnd !== this.pathEnd || !this.graphData.found) {
+          this.switchMode('path');
+          this.pathStart = pathStart;
+          this.pathEnd = pathEnd;
+          this.clearEvidenceHighlight(false);
+          await this.fetchGraph('/api/graph/path', { source: pathStart, target: pathEnd });
+        }
+        return true;
+      }
+      if (!query.q) return false;
+      const keyword = String(query.q);
+      if (keyword !== this.keyword || this.mode !== 'entity' || !this.graphData.found) {
+        this.switchMode('entity');
+        this.keyword = keyword;
+        await this.fetchGraph('/api/graph/search', { keyword });
+      }
+      if (query === this.$route.query) await this.applyEvidenceFromRoute();
+      return true;
+    },
     switchMode(nextMode) {
       if (this.mode === nextMode) return;
       this.mode = nextMode;
       this.graphRequestId += 1;
       this.loading = false;
+      this.expandingNodeId = null;
       this.searched = false;
       this.errorMessage = '';
       this.statusMessage = '';
@@ -1166,6 +1217,7 @@ export default {
     },
     async applyEvidenceFromRoute() {
       const query = this.$route.query || {};
+      const requestId = this.graphRequestId;
       const sourceName = String(query.evidenceSource || '').trim();
       const targetName = String(query.evidenceTarget || '').trim();
       const relation = String(query.evidenceRelation || '').trim();
@@ -1181,13 +1233,17 @@ export default {
       if (source && !target) {
         try {
           const response = await service.get('/api/graph/node/' + encodeURIComponent(source.id), { timeout: 10000 });
+          if (requestId !== this.graphRequestId || query !== this.$route.query) return;
           this.mergeGraph(response.data || EMPTY_GRAPH());
           source = findNode(sourceId, sourceName);
           target = findNode(targetId, targetName);
           await this.$nextTick();
           this.scheduleGraphRender();
         } catch (error) {
-          this.announceStatus('已打开图谱，但未能补全这条回答依据。', true);
+          if (requestId === this.graphRequestId && query === this.$route.query) {
+            this.announceStatus('已打开图谱，但未能补全这条回答依据。', true);
+          }
+          return;
         }
       }
 
@@ -1211,7 +1267,7 @@ export default {
       this.focusedNodeId = null;
       this.showDetails = true;
       this.announceStatus(`已定位回答中的第 ${this.evidenceHighlight.index} 条图谱依据。`);
-      window.setTimeout(() => this.fitView(new Set([String(source.id), String(target.id)])), 100);
+      this.$nextTick(() => this.fitView(new Set([String(source.id), String(target.id)])));
     },
     clearEvidenceHighlight(updateRoute = true) {
       this.evidenceHighlight = null;
@@ -1235,11 +1291,13 @@ export default {
         return;
       }
 
+      const requestId = this.graphRequestId;
       this.expandingNodeId = id;
       this.statusMessage = '';
       this.statusError = false;
       try {
         const response = await service.get('/api/graph/node/' + encodeURIComponent(id));
+        if (requestId !== this.graphRequestId) return;
         const change = this.mergeGraph(response.data || EMPTY_GRAPH());
         this.expandedNodeIds.push(id);
         this.selectedNode = this.graphData.nodes.find(node => String(node.id) === id) || currentNode;
@@ -1256,15 +1314,16 @@ export default {
         const message = error.response && error.response.data && error.response.data.message
           ? error.response.data.message
           : '关系展开失败，请再试一次。';
-        this.announceStatus(message, true);
+        if (requestId === this.graphRequestId) this.announceStatus(message, true);
       } finally {
-        this.expandingNodeId = null;
+        if (requestId === this.graphRequestId) this.expandingNodeId = null;
       }
     },
     async fetchGraph(url, params) {
       const requestId = ++this.graphRequestId;
       const requestMode = this.mode;
       this.loading = true;
+      this.expandingNodeId = null;
       this.errorMessage = '';
       this.statusMessage = '';
       this.searched = true;
@@ -1286,7 +1345,7 @@ export default {
         this.destroyGraph();
         this.errorMessage = error.response && error.response.data && error.response.data.message
           ? error.response.data.message
-          : '请稍后再试。';
+          : '无法连接图谱服务。请确认服务可用后重试。';
       } finally {
         if (requestId === this.graphRequestId) this.loading = false;
       }
@@ -1371,7 +1430,7 @@ export default {
       positions.forEach((position, id) => { nextPositions[id] = position; });
       this.nodePositions = nextPositions;
       this.focusedNodeId = null;
-      this.$nextTick(() => window.requestAnimationFrame(() => this.fitView()));
+      this.$nextTick(() => window.requestAnimationFrame(() => this.handleCanvasResize()));
     },
     initialPositions(randomize = false) {
       const positions = new Map();
@@ -1449,7 +1508,7 @@ export default {
     },
     nodeLabelLines(node) {
       const value = this.shortName(node.name, node.center ? 22 : 20);
-      if (value.length <= 11) return [value];
+      if (value.length <= 11 || /^[a-z0-9_.…-]+$/i.test(value)) return [value];
       const midpoint = Math.ceil(value.length / 2);
       const breakAt = value.lastIndexOf(' ', midpoint);
       const index = breakAt > 3 ? breakAt : midpoint;
@@ -1470,11 +1529,8 @@ export default {
     },
     nodeLabelWidth(node) {
       const lines = this.nodeLabelLines(node);
-      const longest = Math.max(...lines.map(line => line.length), 6);
-      return Math.min(
-        node.center ? 174 : 144,
-        Math.max(node.center ? 96 : 66, longest * 6.2 + 22)
-      );
+      const lineWidth = line => [...line].reduce((total, char) => total + (char.charCodeAt(0) < 127 ? 7 : 12), 0);
+      return Math.max(node.center ? 96 : 66, Math.max(...lines.map(lineWidth)) + 15);
     },
     nodeLabelY(node) {
       return node.center ? 56 : 40;
@@ -1484,6 +1540,17 @@ export default {
     },
     nodePosition(nodeId) {
       return this.nodePositions[String(nodeId)] || { x: 0, y: 0 };
+    },
+    edgeEndpoint(edge) {
+      const source = this.nodePosition(edge.source);
+      const target = this.nodePosition(edge.target);
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const length = Math.hypot(dx, dy);
+      if (!length) return target;
+      const isCenter = String(edge.target) === String(this.graphData.centerId);
+      const trim = Math.min(length, isCenter ? 54 : 37);
+      return { x: target.x - dx * trim / length, y: target.y - dy * trim / length };
     },
     edgeMidpoint(edge) {
       const source = this.nodePosition(edge.source);
@@ -1579,7 +1646,59 @@ export default {
     togglePanel(panel) {
       if (panel === 'filter') this.showFilters = !this.showFilters;
       if (panel === 'detail') this.showDetails = !this.showDetails;
-      this.$nextTick(() => window.requestAnimationFrame(() => this.fitView()));
+      this.$nextTick(() => window.requestAnimationFrame(() => this.handleCanvasResize()));
+    },
+    closePanel(panel) {
+      this.togglePanel(panel);
+      this.$nextTick(() => {
+        const toggle = this.$refs[panel + 'Toggle'];
+        const target = toggle?.getClientRects().length ? toggle : this.$refs.jumpDetail;
+        target?.focus();
+      });
+    },
+    focusDetails() {
+      if (this.fullscreen) return;
+      this.showDetails = true;
+      this.$nextTick(() => this.$refs.details?.focus());
+    },
+    handleDetailTabKeydown(event) {
+      const tabs = ['relations', 'properties', 'evidence'];
+      const index = tabs.indexOf(this.detailTab);
+      const target = {
+        ArrowLeft: (index + tabs.length - 1) % tabs.length,
+        ArrowRight: (index + 1) % tabs.length,
+        Home: 0,
+        End: tabs.length - 1
+      }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      this.detailTab = tabs[target];
+      this.$nextTick(() => document.getElementById('detail-' + this.detailTab + '-tab')?.focus());
+    },
+    handleCanvasKeydown(event) {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const positions = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] };
+      const shift = positions[event.key];
+      if (shift) {
+        this.viewport = { ...this.viewport, x: this.viewport.x + shift[0], y: this.viewport.y + shift[1] };
+      } else if (event.key === '+' || event.key === '=') {
+        this.zoomBy(1.22);
+      } else if (event.key === '-') {
+        this.zoomBy(.82);
+      } else if (event.key === '0') {
+        this.fitView();
+      } else {
+        return;
+      }
+      event.preventDefault();
+    },
+    handleCanvasResize() {
+      const highlight = this.evidenceHighlight;
+      this.fitView(highlight ? new Set([highlight.sourceId, highlight.targetId]) : undefined);
+    },
+    handleFullscreenChange() {
+      this.fullscreen = Boolean(this.$refs.networkPanel && document.fullscreenElement === this.$refs.networkPanel);
+      this.$nextTick(() => this.handleCanvasResize());
     },
     clearNeighborhoodFocus() {
       this.focusedNodeId = null;
@@ -1591,8 +1710,9 @@ export default {
       if (fit) this.$nextTick(() => this.fitView(this.focusedNodeIds));
     },
     selectNodeById(nodeId) {
-      const node = this.visibleNodes.find(item => String(item.id) === String(nodeId));
+      const node = this.graphData.nodes.find(item => String(item.id) === String(nodeId));
       if (!node) return;
+      if (!this.isTypeActive(node.label)) this.activeTypes.push(node.label);
       this.selectNode(node);
       this.centerNodeInView(node.id);
     },
@@ -1673,6 +1793,9 @@ export default {
       };
     },
     handleWheel(event) {
+      if (event.ctrlKey || event.metaKey || event.deltaX) return;
+      if (window.matchMedia('(pointer: coarse)').matches) return;
+      event.preventDefault();
       const rect = this.$refs.cyCanvas.getBoundingClientRect();
       const anchorX = event.clientX - rect.left;
       const anchorY = event.clientY - rect.top;
@@ -1688,18 +1811,18 @@ export default {
         : this.visibleNodes;
       if (!nodes.length) return;
 
-      const positions = nodes.map(node => this.nodePosition(node.id));
-      const minX = Math.min(...positions.map(position => position.x)) - 44;
-      const maxX = Math.max(...positions.map(position => position.x)) + 44;
-      const minY = Math.min(...positions.map(position => position.y)) - 44;
-      const maxY = Math.max(...positions.map(position => position.y)) + 44;
+      const positions = nodes.map(node => ({ node, ...this.nodePosition(node.id) }));
+      const minX = Math.min(...positions.map(({ node, x }) => x - this.nodeLabelWidth(node) / 2));
+      const maxX = Math.max(...positions.map(({ node, x }) => x + this.nodeLabelWidth(node) / 2));
+      const minY = Math.min(...positions.map(({ node, y }) => y - (node.center ? 59 : 39)));
+      const maxY = Math.max(...positions.map(({ node, y }) => y + this.nodeLabelY(node) + this.nodeLabelHeight(node)));
       const rect = this.$refs.cyCanvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
 
-      const padding = 54;
+      const padding = Math.min(38, rect.width * .09);
       const scale = Math.min(
         2.2,
-        Math.max(.35, Math.min(
+        Math.max(.25, Math.min(
           (rect.width - padding * 2) / Math.max(88, maxX - minX),
           (rect.height - padding * 2) / Math.max(88, maxY - minY)
         ))
@@ -1722,7 +1845,7 @@ export default {
       };
     },
     setZoom(value, anchorX, anchorY) {
-      const next = Math.min(2.2, Math.max(.35, value));
+      const next = Math.min(2.2, Math.max(.25, value));
       const worldX = (anchorX - this.viewport.x) / this.viewport.scale;
       const worldY = (anchorY - this.viewport.y) / this.viewport.scale;
       this.viewport = {
@@ -1738,13 +1861,12 @@ export default {
       this.setZoom(this.viewport.scale * factor, rect.width / 2, rect.height / 2);
     },
     async toggleFullscreen() {
-      const element = this.$refs.graphStage;
+      const element = this.$refs.networkPanel;
       try {
         if (!document.fullscreenElement && element.requestFullscreen) await element.requestFullscreen();
         else if (document.exitFullscreen) await document.exitFullscreen();
-        window.setTimeout(() => this.fitView(), 120);
       } catch (error) {
-        this.errorMessage = '当前浏览器无法进入全屏模式。';
+        this.announceStatus('当前浏览器无法切换全屏。', true);
       }
     },
     retrySearch() {
@@ -1872,9 +1994,6 @@ export default {
         this.statusTimer = null;
       }, 3600);
     },
-    prefersReducedMotion() {
-      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    },
     isHttpUrl(value) {
       return typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value);
     }
@@ -1883,831 +2002,404 @@ export default {
 </script>
 
 <style scoped>
-.graph-page { max-width: 1680px; margin: 0 auto; color: #163b2e; }
-.graph-page button, .graph-page a { touch-action: manipulation; }
-.graph-page button:focus-visible, .graph-page input:focus-visible, .graph-page a:focus-visible { outline: 3px solid rgba(23,107,69,.42); outline-offset: 2px; }
-.page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 5px 4px 22px; }
-.page-intro p { margin: 0 0 7px; color: #2d7d58; font-size: 12px; font-weight: 800; letter-spacing: .13em; }
-.page-intro h1 { margin: 0; font-size: clamp(28px, 3.25vw, 45px); line-height: 1.14; letter-spacing: -.045em; }
-.page-intro span { display: block; margin-top: 10px; color: #657c70; font-size: 14px; }
-.coverage-strip { display: flex; min-height: 48px; align-items: center; gap: 0; max-width: 980px; margin: -8px auto 14px; overflow: hidden; border: 1px solid #dce7df; border-radius: 12px; background: rgba(255,255,255,.76); }
-.coverage-strip > div { display: flex; min-width: 120px; align-items: baseline; gap: 6px; padding: 9px 14px; border-right: 1px solid #e4ebe6; }
-.coverage-strip strong { color: #1c6544; font-size: 15px; font-variant-numeric: tabular-nums; }
-.coverage-strip span { color: #6d8176; font-size: 10px; white-space: nowrap; }
-.coverage-strip p { margin: 0 14px 0 auto; color: #557064; font-size: 10px; line-height: 1.4; text-align: right; }
-.mode-switch { display: flex; flex: 0 0 auto; gap: 4px; padding: 4px; border: 1px solid #d5e0d8; border-radius: 12px; background: #fff; }
-.mode-switch button { min-height: 40px; padding: 8px 13px; border: 0; border-radius: 8px; background: transparent; color: #61786c; cursor: pointer; font-size: 12px; font-weight: 700; }
-.mode-switch button.active { background: #e7f0e9; color: #176b45; }
-.search-bar { display: flex; min-height: 58px; align-items: center; max-width: 980px; margin: 0 auto; overflow: hidden; border: 1px solid #c9d9cf; border-radius: 15px; background: #fff; box-shadow: 0 13px 40px rgba(31,71,52,.08); }
-.search-bar:focus-within { border-color: #368461; box-shadow: 0 0 0 4px rgba(42,127,87,.1), 0 13px 40px rgba(31,71,52,.08); }
-.search-bar > svg { width: 21px; flex: 0 0 auto; margin-left: 18px; fill: none; stroke: #72877b; stroke-width: 1.8; stroke-linecap: round; }
-.search-bar input { min-width: 0; height: 56px; flex: 1; padding: 0 14px; border: 0; outline: 0; color: #183b2e; font-size: 14px; }
-.search-bar button, .path-search > button, .compare-search > button:last-child { align-self: stretch; min-width: 118px; border: 0; background: #176b45; color: #fff; cursor: pointer; font-size: 12px; font-weight: 800; }
-.search-bar button:hover:not(:disabled), .path-search > button:hover:not(:disabled), .compare-search > button:last-child:hover:not(:disabled) { background: #0f5a38; }
-.search-bar button:disabled, .path-search > button:disabled, .compare-search > button:last-child:disabled { opacity: .45; cursor: not-allowed; }
-.path-search { display: grid; grid-template-columns: minmax(180px,1fr) 32px minmax(180px,1fr) 118px; align-items: end; gap: 12px; max-width: 980px; margin: 0 auto; padding: 13px; border: 1px solid #c9d9cf; border-radius: 15px; background: #fff; box-shadow: 0 13px 40px rgba(31,71,52,.08); }
-.path-search div { min-width: 0; }
-.path-search .path-explainer { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; padding: 0 2px 2px; color: #657c70; font-size: 11px; line-height: 1.5; }
-.path-explainer strong { flex: 0 0 auto; color: #245f45; }
-.path-search label { display: block; margin-bottom: 5px; color: #61786c; font-size: 11px; font-weight: 700; }
-.path-search input { width: 100%; height: 40px; padding: 0 10px; border: 1px solid #d8e3db; border-radius: 9px; outline: 0; color: #183b2e; font-size: 13px; }
-.path-search input:focus { border-color: #6c9d82; box-shadow: 0 0 0 3px rgba(42,127,87,.08); }
-.path-search > svg { width: 20px; margin: 0 auto 10px; fill: none; stroke: #759084; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.path-search > button { min-height: 39px; border-radius: 9px; }
-.compare-search { display: grid; grid-template-columns: minmax(190px,1fr) 42px minmax(190px,1fr) 118px; align-items: end; gap: 10px; max-width: 980px; margin: 0 auto; padding: 13px; border: 1px solid #c9d9cf; border-radius: 15px; background: #fff; box-shadow: 0 13px 40px rgba(31,71,52,.08); }
-.compare-explainer { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; color: #657c70; font-size: 11px; }
-.compare-explainer strong { color: #245f45; }
-.compare-search label { display: block; margin-bottom: 5px; color: #61786c; font-size: 11px; font-weight: 700; }
-.compare-search input { width: 100%; height: 40px; padding: 0 10px; border: 1px solid #d8e3db; border-radius: 9px; outline: 0; color: #183b2e; font-size: 13px; }
-.compare-search input:focus { border-color: #6c9d82; box-shadow: 0 0 0 3px rgba(42,127,87,.08); }
-.compare-search .swap-products { display: grid; width: 40px; height: 40px; place-items: center; padding: 0; border: 1px solid #d2dfd6; border-radius: 9px; background: #f7faf8; color: #557467; cursor: pointer; }
-.swap-products:hover { border-color: #80a591; color: #176b45; }
-.swap-products svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.compare-search > button:last-child { min-height: 40px; border-radius: 9px; }
-.sample-row { display: flex; min-height: 46px; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; padding: 8px 0; }
-.sample-row > span { color: #6d8377; font-size: 12px; }
-.sample-row button { min-height: 34px; padding: 7px 11px; border: 1px solid #d7e2da; border-radius: 999px; background: #fbfdfb; color: #516c5d; cursor: pointer; font-size: 11px; }
-.sample-row button:hover { border-color: #84aa94; color: #176b45; }
-.compare-workspace { min-height: 600px; padding: clamp(18px,2.4vw,34px); border: 1px solid #d9e4dc; border-radius: 18px; background: #f8faf8; box-shadow: 0 22px 60px rgba(28,63,47,.08); }
-.compare-state { display: grid; min-height: 530px; align-content: center; justify-items: center; color: #365748; text-align: center; }
-.compare-state strong { font-size: 16px; }
-.compare-state p { margin: 8px 0 0; color: #72877c; font-size: 12px; }
-.compare-state button { min-height: 40px; margin-top: 14px; padding: 8px 14px; border: 0; border-radius: 9px; background: #176b45; color: #fff; cursor: pointer; }
-.comparison-header { display: grid; grid-template-columns: minmax(0,1fr) 132px minmax(0,1fr); align-items: stretch; gap: 14px; }
-.product-card { min-width: 0; padding: 22px; border: 1px solid #d9e5dd; border-radius: 15px; background: #fff; }
-.product-card > span { color: #668074; font-size: 10px; font-weight: 800; letter-spacing: .05em; }
-.product-card h2 { margin: 8px 0 0; overflow-wrap: anywhere; font-size: 22px; line-height: 1.25; }
-.product-card p { margin: 8px 0 0; color: #657c70; font-size: 12px; line-height: 1.55; }
-.product-card button { min-height: 38px; margin-top: 17px; padding: 8px 11px; border: 1px solid #cfded4; border-radius: 9px; background: #fff; color: #266c4d; cursor: pointer; font-size: 11px; font-weight: 800; }
-.product-card button:hover { border-color: #79a28b; }
-.product-card.right { text-align: right; }
-.comparison-score { display: grid; align-content: center; justify-items: center; padding: 14px 6px; border-radius: 15px; background: #173c2e; color: #fff; text-align: center; }
-.comparison-score strong { color: #c9ef78; font-size: 34px; font-variant-numeric: tabular-nums; }
-.comparison-score span { margin-top: 1px; font-size: 11px; font-weight: 800; }
-.comparison-score small { margin-top: 8px; color: #b9cbc2; font-size: 10px; }
-.comparison-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 13px 0 22px; }
-.comparison-actions button { min-height: 40px; padding: 8px 13px; border: 1px solid #cddbd2; border-radius: 9px; background: #fff; color: #3e6251; cursor: pointer; font-size: 11px; font-weight: 800; }
-.comparison-actions button:first-child { border-color: #176b45; background: #176b45; color: #fff; }
-.comparison-block { margin-top: 16px; overflow: hidden; border: 1px solid #dce6df; border-radius: 15px; background: #fff; }
-.comparison-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 18px 20px; border-bottom: 1px solid #e4ebe6; }
-.comparison-title span { color: #2d7d58; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
-.comparison-title h3 { margin: 4px 0 0; font-size: 16px; }
-.comparison-title p { max-width: 380px; margin: 0; color: #71867b; font-size: 10px; line-height: 1.5; text-align: right; }
-.comparison-table { overflow-x: auto; }
-.comparison-row { display: grid; min-width: 720px; grid-template-columns: 130px minmax(190px,1fr) minmax(190px,1fr) 70px; align-items: start; border-bottom: 1px solid #edf1ee; }
-.comparison-row:last-child { border-bottom: 0; }
-.comparison-row > * { min-width: 0; padding: 12px 14px; overflow-wrap: anywhere; color: #3e5e50; font-size: 11px; line-height: 1.55; }
-.comparison-row.heading { background: #f5f8f6; }
-.comparison-row.heading span { color: #637a6e; font-size: 10px; font-weight: 800; }
-.comparison-row em { display: inline-flex; min-height: 24px; width: max-content; align-items: center; align-self: center; margin: 8px 14px; padding: 3px 7px; border-radius: 999px; background: #fff0eb; color: #a54e32; font-size: 10px; font-style: normal; font-weight: 800; }
-.comparison-row em.same { background: #e8f3eb; color: #27704f; }
-.relation-comparison article { padding: 0 20px 20px; }
-.relation-comparison article + article { border-top: 1px solid #e6ede8; }
-.relation-comparison article > header { display: flex; align-items: center; justify-content: space-between; padding: 17px 0 10px; }
-.relation-comparison h4 { margin: 0; font-size: 13px; }
-.relation-comparison article > header span { color: #70867a; font-size: 10px; font-variant-numeric: tabular-nums; }
-.relation-diff-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
-.relation-diff-grid > div { min-width: 0; padding: 13px; border: 1px solid #e2eae5; border-radius: 11px; background: #fafcfa; }
-.relation-diff-grid strong { display: block; margin-bottom: 9px; color: #5c7468; font-size: 10px; }
-.relation-diff-grid p { margin: 0; color: #91a097; font-size: 10px; }
-.relation-diff-grid > div > div { display: flex; flex-wrap: wrap; gap: 6px; }
-.relation-diff-grid span { max-width: 100%; padding: 5px 7px; overflow-wrap: anywhere; border-radius: 7px; background: #edf2ee; color: #426151; font-size: 10px; }
-.relation-diff-grid span.common { background: #e3f1e7; color: #206a48; font-weight: 800; }
-.workspace { display: grid; grid-template-columns: 224px minmax(520px,1fr) 310px; height: clamp(620px, calc(100dvh - 220px), 760px); min-height: 0; overflow: hidden; border: 1px solid #d9e4dc; border-radius: 18px; background: #fff; box-shadow: 0 22px 60px rgba(28,63,47,.08); }
-.workspace.filter-collapsed { grid-template-columns: minmax(520px,1fr) 310px; }
-.workspace.detail-collapsed { grid-template-columns: 224px minmax(520px,1fr); }
-.workspace.filter-collapsed.detail-collapsed { grid-template-columns: minmax(520px,1fr); }
-.filter-panel, .detail-panel { min-width: 0; min-height: 0; background: #fff; }
-.filter-panel { display: flex; flex-direction: column; border-right: 1px solid #e0e8e2; }
-.detail-panel { display: flex; overflow: hidden; flex-direction: column; border-left: 1px solid #e0e8e2; }
-.panel-heading { display: flex; min-height: 58px; align-items: center; justify-content: space-between; padding: 12px 15px; border-bottom: 1px solid #e5ece7; }
-.panel-heading > span { font-size: 12px; font-weight: 800; }
-.panel-heading button { min-height: 32px; border: 0; background: transparent; color: #2f7756; cursor: pointer; font-size: 11px; }
-.panel-heading > div { display: flex; align-items: center; gap: 4px; }
-.detail-heading i { width: 9px; height: 9px; border-radius: 50%; }
-.detail-heading button { width: 32px; padding: 0; color: #6c8176; font-size: 18px; line-height: 1; }
-.type-list { display: grid; min-height: 0; gap: 4px; padding: 10px; overflow-y: auto; }
-.type-list button { display: grid; min-height: 46px; grid-template-columns: 10px 1fr 16px; align-items: center; gap: 8px; width: 100%; padding: 9px 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #3e5e50; cursor: pointer; text-align: left; }
-.type-list button:hover { background: #f3f7f4; }
-.type-list button.inactive { opacity: .4; }
-.type-list i { width: 8px; height: 8px; border-radius: 50%; }
-.type-list strong, .type-list small { display: block; }
-.type-list strong { font-size: 12px; }
-.type-list small { margin-top: 3px; color: #70867a; font-size: 10px; }
-.type-list svg { width: 15px; fill: none; stroke: #4c8468; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.type-list button.inactive svg { visibility: hidden; }
-.filter-empty { padding: 20px 16px; color: #71867b; font-size: 11px; line-height: 1.65; }
-.interaction-help { margin-top: auto; padding: 16px; border-top: 1px solid #e5ece7; background: #fafcf9; }
-.interaction-help > p { margin: 0 0 9px; color: #526e60; font-size: 11px; font-weight: 800; }
-.interaction-help dl { display: grid; gap: 7px; margin: 0; }
-.interaction-help dl div { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
-.interaction-help dt { color: #557065; font-weight: 700; }
-.interaction-help dd { margin: 0; color: #93a299; }
-.network-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #f8faf8; }
-.network-toolbar { display: flex; min-height: 59px; align-items: center; justify-content: space-between; padding: 10px 13px 10px 17px; border-bottom: 1px solid #e0e8e2; background: #fff; }
-.result-summary strong, .result-summary span { display: block; }
-.result-summary strong { max-width: 430px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.result-summary span { margin-top: 4px; color: #6e8378; font-size: 11px; font-variant-numeric: tabular-nums; }
-.tool-actions { display: flex; align-items: center; gap: 4px; }
-.tool-actions button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid #cbd9d0; border-radius: 9px; background: #fff; color: #506b5c; cursor: pointer; }
-.tool-actions button:hover { border-color: #8db09b; color: #176b45; }
-.tool-actions button:disabled { opacity: .38; cursor: not-allowed; }
-.tool-actions svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.tool-actions span { min-width: 40px; color: #60786b; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; }
-.evidence-highlight-banner { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 16px; border-bottom: 1px solid #ead9a8; background: #fff9e8; }
-.evidence-highlight-banner span, .evidence-highlight-banner strong { display: block; }
-.evidence-highlight-banner span { color: #8a681d; font-size: 9px; font-weight: 800; letter-spacing: .06em; }
-.evidence-highlight-banner strong { margin-top: 3px; color: #5f4a1f; font-size: 11px; line-height: 1.45; }
-.evidence-highlight-banner button { min-height: 34px; flex: 0 0 auto; padding: 7px 9px; border: 1px solid #dbc784; border-radius: 8px; background: #fffdf5; color: #75591b; cursor: pointer; font-size: 10px; font-weight: 800; }
-.graph-stage { position: relative; min-height: 0; flex: 1; overflow: hidden; background: radial-gradient(circle at 50% 44%, #fff 0, #f7faf7 66%, #eef4ef 100%); }
-.graph-stage:fullscreen { width: 100vw; height: 100vh; background: #f7faf7; }
-.network-grid { position: absolute; inset: 0; opacity: .42; background-image: radial-gradient(#c7d7cc 1px, transparent 1px); background-size: 25px 25px; mask-image: radial-gradient(circle at center, #000 28%, transparent 88%); }
-.cy-canvas { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: hidden; touch-action: none; user-select: none; cursor: grab; }
-.cy-canvas:active { cursor: grabbing; }
-.svg-edge { opacity: 1; transition: opacity .16s ease; }
-.svg-edge line { stroke: #aebfb4; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.svg-edge text { fill: #667e71; stroke: rgba(255,255,255,.94); stroke-width: 5px; paint-order: stroke; text-anchor: middle; font-size: 8px; font-weight: 700; pointer-events: none; }
-.svg-edge.focused line { stroke: #6f9d82; stroke-width: 2.2; }
-.svg-edge.dimmed, .svg-node.dimmed { opacity: .13; }
-.svg-edge.evidence { opacity: 1; }
-.svg-edge.evidence line { stroke: #c18a12; stroke-width: 4; }
-.svg-edge.evidence text { fill: #7c580d; font-size: 9px; }
-.svg-node { outline: none; cursor: grab; transition: opacity .16s ease; }
-.svg-node:active { cursor: grabbing; }
-.svg-node circle { stroke-width: 2; vector-effect: non-scaling-stroke; }
-.svg-node.center circle { stroke: #0d5937; stroke-width: 3; }
-.svg-node.selected circle, .svg-node:focus-visible circle { stroke: #122f25; stroke-width: 5; }
-.svg-node.evidence { opacity: 1; }
-.svg-node.evidence circle { stroke: #c18a12; stroke-width: 6; filter: drop-shadow(0 0 7px rgba(193,138,18,.42)); }
-.svg-node text { fill: #294e3e; stroke: rgba(255,255,255,.92); stroke-width: 4px; paint-order: stroke; text-anchor: middle; dominant-baseline: middle; font-size: 9px; font-weight: 700; pointer-events: none; }
-.svg-node.center text:not(.image-label) { fill: #fff; stroke: rgba(13,89,55,.8); }
-.svg-node text.image-label { transform: translateY(49px); }
-.canvas-state { position: absolute; z-index: 3; inset: 0; display: grid; align-content: center; justify-items: center; padding: 30px; background: rgba(248,250,248,.7); text-align: center; backdrop-filter: blur(2px); }
-.canvas-state > svg { width: 48px; margin-bottom: 14px; fill: none; stroke: #8da295; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.canvas-state h2 { margin: 0; font-size: 16px; }
-.canvas-state p { max-width: 380px; margin: 8px 0 0; color: #7b8f83; font-size: 11px; line-height: 1.6; }
-.canvas-state button { margin-top: 14px; padding: 9px 14px; border: 0; border-radius: 8px; background: #176b45; color: #fff; cursor: pointer; }
-.error-state > svg { stroke: #c86743; }
-.loader { width: 32px; height: 32px; margin-bottom: 14px; border: 3px solid #dbe6de; border-top-color: #176b45; border-radius: 50%; animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.seed-graph { position: relative; display: grid; width: 132px; height: 116px; margin-bottom: 16px; place-items: center; }
-.seed-graph strong { display: grid; z-index: 2; width: 62px; height: 62px; place-items: center; border-radius: 50%; background: #176b45; color: #fff; font-size: 13px; }
-.seed-graph i { position: absolute; width: 25px; height: 25px; border: 2px solid #87a795; border-radius: 50%; background: #fff; }
-.seed-graph i::after { position: absolute; top: 10px; width: 42px; height: 1px; background: #aec2b6; content: ''; }
-.seed-graph i:nth-child(1) { top: 0; left: 53px; }.seed-graph i:nth-child(1)::after { transform: rotate(90deg); transform-origin: left; }
-.seed-graph i:nth-child(2) { top: 45px; right: 0; }.seed-graph i:nth-child(2)::after { right: 21px; }
-.seed-graph i:nth-child(3) { bottom: 0; left: 53px; }.seed-graph i:nth-child(3)::after { transform: rotate(90deg); transform-origin: left; }
-.seed-graph i:nth-child(4) { top: 45px; left: 0; }.seed-graph i:nth-child(4)::after { left: 21px; }
-.truncate-badge { position: absolute; z-index: 2; right: 13px; bottom: 13px; padding: 7px 10px; border: 1px solid #d4dfd7; border-radius: 999px; background: rgba(255,255,255,.91); color: #60776b; font-size: 10px; backdrop-filter: blur(8px); }
-.expand-status { position: absolute; z-index: 4; left: 50%; bottom: 17px; display: flex; min-height: 38px; align-items: center; gap: 8px; max-width: min(420px,calc(100% - 32px)); padding: 8px 13px; transform: translateX(-50%); border: 1px solid #cbded2; border-radius: 999px; background: rgba(255,255,255,.96); box-shadow: 0 8px 24px rgba(32,70,52,.13); color: #315f49; font-size: 11px; font-weight: 700; }
-.expand-status.error { border-color: #e4b8aa; color: #a34f32; }
-.mini-loader { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid #d9e6dd; border-top-color: #176b45; border-radius: 50%; animation: spin .7s linear infinite; }
-.entity-summary { display: grid; grid-template-columns: 76px minmax(0,1fr); align-items: center; gap: 12px; padding: 14px 15px 12px; }
-.entity-summary.without-image { grid-template-columns: 1fr; }
-.entity-image { width: 76px; height: 76px; overflow: hidden; border: 1px solid #dfe8e2; border-radius: 12px; background: #eef3ef; }
-.entity-image img { width: 100%; height: 100%; object-fit: cover; }
-.entity-identity { min-width: 0; }
-.entity-identity span { display: inline-block; padding: 4px 7px; border-radius: 999px; background: #edf3ee; color: #4f6b5c; font-size: 10px; font-weight: 700; }
-.entity-identity h2 { margin: 7px 0 0; overflow-wrap: anywhere; font-size: 16px; line-height: 1.3; }
-.entity-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 0 15px 15px; }
-.entity-actions button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d3e0d7; border-radius: 9px; background: #fff; color: #416051; cursor: pointer; font-size: 11px; font-weight: 700; }
-.entity-actions button:first-child { border-color: #176b45; background: #176b45; color: #fff; }
-.entity-actions button:hover:not(:disabled) { border-color: #79a28b; }
-.entity-actions button:disabled { opacity: .45; cursor: not-allowed; }
-.entity-actions svg { width: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.detail-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; margin: 0 15px; padding: 4px; border: 1px solid #dfe8e2; border-radius: 10px; background: #f5f8f6; }
-.detail-tabs button { min-height: 36px; border: 0; border-radius: 7px; background: transparent; color: #667c70; cursor: pointer; font-size: 11px; font-weight: 700; }
-.detail-tabs button span { margin-left: 4px; color: #87998f; font-variant-numeric: tabular-nums; }
-.detail-tabs button.active { background: #fff; box-shadow: 0 1px 5px rgba(28,63,47,.1); color: #176b45; }
-.detail-tabs button:disabled { opacity: .42; cursor: not-allowed; }
-.detail-scroll { min-height: 0; flex: 1; margin-top: 10px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.relation-list, .property-list { padding: 4px 15px 18px; }
-.relation-list button { display: flex; min-height: 38px; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border: 0; border-bottom: 1px solid #edf1ee; background: transparent; color: #365b49; cursor: pointer; text-align: left; font-size: 11px; }
-.relation-list button:last-child { border-bottom: 0; }
-.relation-list button:hover span { color: #176b45; }
-.relation-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.relation-list button small { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: #edf3ee; color: #637a6e; font-size: 10px; }
-.property-list dl { display: grid; gap: 0; margin: 0; }
-.property-item { display: grid; grid-template-columns: 82px minmax(0,1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid #edf1ee; }
-.property-item:last-child { border-bottom: 0; }
-.property-list dt { color: #74887e; font-size: 10px; line-height: 1.45; }
-.property-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #365748; font-size: 11px; line-height: 1.55; }
-.property-list dd > span { display: -webkit-box; overflow: hidden; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.property-list dd > span.expanded { display: block; overflow: visible; -webkit-line-clamp: unset; }
-.property-list dd button { min-height: 28px; margin-top: 5px; padding: 2px 0; border: 0; background: transparent; color: #277451; cursor: pointer; font-size: 10px; font-weight: 800; }
-.property-list a { color: #24714f; }
-.evidence-panel { padding: 4px 15px 20px; }
-.evidence-status { padding: 13px; border: 1px solid #d9e8de; border-radius: 11px; background: linear-gradient(135deg,#f1f7f3,#fbfdfb); }
-.evidence-status span, .evidence-status strong { display: block; }
-.evidence-status span { color: #648073; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
-.evidence-status strong { margin-top: 5px; color: #21563e; font-size: 12px; line-height: 1.45; }
-.evidence-panel dl { display: grid; gap: 0; margin: 10px 0 0; }
-.evidence-panel dl div { display: grid; grid-template-columns: 78px minmax(0,1fr); gap: 9px; padding: 9px 0; border-bottom: 1px solid #edf1ee; }
-.evidence-panel dt { color: #7b8d83; font-size: 10px; }
-.evidence-panel dd { margin: 0; overflow-wrap: anywhere; color: #365748; font-size: 11px; line-height: 1.5; }
-.evidence-panel > a { display: inline-flex; min-height: 34px; align-items: center; margin-top: 12px; color: #24714f; font-size: 10px; font-weight: 800; }
-.evidence-panel > p { margin: 13px 0 0; color: #71867b; font-size: 10px; line-height: 1.6; }
-.no-properties { padding: 18px 0; color: #71867b; font-size: 11px; }
-.detail-empty { display: grid; min-height: 0; flex: 1; align-content: center; justify-items: center; padding: 28px; text-align: center; }
-.detail-empty svg { width: 46px; fill: none; stroke: #a3b2aa; stroke-width: 1.4; }
-.detail-empty p { max-width: 210px; margin: 13px 0 0; color: #71867b; font-size: 11px; line-height: 1.65; }
-.graph-page {
-  --ink: #172033;
-  --muted: #667085;
-  --line: #dbe2ef;
-  --glass: rgba(255, 255, 255, .92);
-  --glass-strong: #f8f9fc;
-  --accent: #4f6ef7;
-  --accent-strong: #3654d8;
-  --canvas: #0b1630;
-  max-width: 1860px;
-  color: var(--ink);
+.graph-page { min-width: 0; }
+.mode-switch {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--wash);
 }
-.graph-page button:focus-visible,
-.graph-page input:focus-visible,
-.graph-page a:focus-visible { outline-color: #4f6ef7; box-shadow: 0 0 0 5px rgba(79, 110, 247, .13); }
-.page-intro { align-items: center; min-height: 62px; padding: 0 4px 14px; }
-.page-intro p { margin-bottom: 4px; color: #4f6ef7; font-size: 9px; letter-spacing: .22em; }
-.page-intro h1 { font-size: clamp(25px, 2.2vw, 34px); letter-spacing: -.035em; }
-.page-intro span { margin-top: 5px; color: #667085; font-size: 12px; }
-.mode-switch { border-color: var(--line); border-radius: 14px; background: #fff; box-shadow: 0 5px 18px rgba(32, 49, 83, .06); }
-.mode-switch button { min-height: 38px; color: #667085; }
-.mode-switch button:hover { color: #2946be; }
-.mode-switch button.active { background: #eef2ff; color: #3654d8; box-shadow: inset 0 0 0 1px #dce4ff; }
-.coverage-strip { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; margin: auto 11px 10px; border-color: var(--line); background: #fff; box-shadow: none; }
-.coverage-strip > div { display: grid; min-width: 0; gap: 1px; padding: 9px 10px; border-right-color: var(--line); border-bottom: 1px solid var(--line); }
-.coverage-strip > div:nth-child(even) { border-right: 0; }
-.coverage-strip > div:nth-last-child(-n+2) { border-bottom: 0; }
-.coverage-strip strong { color: #3654d8; }
-.coverage-strip span, .coverage-strip p { color: #7a8497; }
-.coverage-strip p { grid-column: 1 / -1; margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); text-align: left; }
-.search-bar, .path-search, .compare-search {
-  max-width: 1080px;
-  border-color: #dbe2ef;
-  background: #fff;
-  box-shadow: 0 12px 34px rgba(32, 49, 83, .08);
-}
-.search-bar { min-height: 54px; }
-.search-bar:focus-within { border-color: #96a9ff; box-shadow: 0 0 0 4px rgba(79, 110, 247, .09), 0 12px 34px rgba(32, 49, 83, .08); }
-.search-bar > svg { color: #74809a; stroke: currentColor; }
-.search-bar input, .path-search input, .compare-search input { color: #172033; caret-color: #4f6ef7; }
-.search-bar input { height: 52px; background: transparent; }
-.search-bar input::placeholder, .path-search input::placeholder, .compare-search input::placeholder { color: #8a94a7; opacity: 1; }
-.search-bar button, .path-search > button, .compare-search > button:last-child { background: #4f6ef7; }
-.search-bar button:hover:not(:disabled), .path-search > button:hover:not(:disabled), .compare-search > button:last-child:hover:not(:disabled) { background: #3e5de2; }
-.path-search .path-explainer, .compare-explainer, .path-search label, .compare-search label { color: #667085; }
-.path-explainer strong, .compare-explainer strong { color: #3654d8; }
-.path-search input, .compare-search input, .compare-search .swap-products { border-color: var(--line); background: #f8f9fc; }
-.compare-search .swap-products { color: #56627a; }
-.sample-row { min-height: 40px; padding: 5px 0 8px; }
-.sample-row > span { color: #7a8497; }
-.sample-row button { min-height: 31px; border-color: var(--line); background: #fff; color: #56627a; }
-.sample-row button:hover { border-color: #9bacf7; color: #3654d8; }
-.graph-page button:active:not(:disabled) { filter: brightness(1.12); }
-.workspace {
-  grid-template-columns: 232px minmax(520px, 1fr) 328px;
-  height: clamp(460px, calc(100dvh - 252px), 820px);
-  border-color: #d7dfec;
-  border-radius: 24px;
-  background: var(--canvas);
-  box-shadow: 0 22px 60px rgba(35, 48, 82, .12);
-}
-.filter-panel, .detail-panel { background: var(--glass-strong); }
-.filter-panel { border-right-color: var(--line); }
-.detail-panel { border-left-color: var(--line); }
-.panel-heading { min-height: 56px; border-bottom-color: var(--line); }
-.panel-heading > span { color: #26324a; letter-spacing: .04em; }
-.panel-heading button { color: #4f6ef7; }
-.detail-heading button { color: #7a8497; }
-.type-list { flex: 1; gap: 5px; padding: 11px; scrollbar-color: #c7d0e0 transparent; }
-.type-list button { color: #39445b; }
-.type-list button:hover { border-color: #e1e6f0; background: #f0f3f9; }
-.type-list button.inactive { opacity: .35; }
-.type-list small, .filter-empty { color: #7b8497; }
-.type-list svg { stroke: #6076dd; }
-.interaction-help { margin-top: 0; border-top-color: var(--line); background: #f2f4f8; }
-.interaction-help > p, .interaction-help dt { color: #56627a; }
-.interaction-help dd { color: #8a94a7; }
-.network-panel { position: relative; background: var(--canvas); }
-.network-toolbar {
-  position: absolute;
-  z-index: 6;
-  inset: 14px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
+.mode-switch button {
+  min-height: 36px;
+  padding: 6px 13px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
-  pointer-events: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
 }
-.result-summary {
-  max-width: min(420px, calc(100% - 100px));
-  padding: 10px 14px;
-  border: 1px solid rgba(175, 191, 225, .24);
-  border-radius: 13px;
-  background: rgba(19, 31, 66, .82);
-  box-shadow: 0 10px 30px rgba(3, 8, 25, .22);
-  backdrop-filter: blur(16px);
-  pointer-events: auto;
+.mode-switch button:hover { color: var(--accent); }
+.mode-switch .active { border-color: var(--line); background: var(--surface); color: var(--accent); font-weight: 750; }
+
+.query-dock {
+  margin-bottom: 16px;
+  padding: 16px 20px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
-.result-summary strong { color: #f7f9ff; }
-.result-summary span { color: #a7b3ce; }
-.result-summary.path-result { max-width: min(620px, calc(100% - 80px)); padding: 13px 15px 12px; }
-.result-summary .result-eyebrow { margin-bottom: 5px; color: #98a9ff; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
-.result-summary.path-result strong { font-size: 14px; }
-.result-summary.path-result p { margin: 6px 0 8px; color: #d5dced; font-size: 11px; line-height: 1.5; }
-.result-summary.path-result ol { display: flex; min-width: 0; align-items: center; gap: 6px; margin: 0; padding: 0 0 8px; overflow-x: auto; list-style: none; }
-.result-summary.path-result li { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; color: #e9edfa; font-size: 10px; white-space: nowrap; }
-.result-summary.path-result li small { padding: 3px 7px; border-radius: 999px; background: rgba(116, 138, 245, .18); color: #b8c4ff; font-size: 9px; font-weight: 800; }
-.result-summary .result-metrics { padding-top: 7px; border-top: 1px solid rgba(177,190,222,.16); }
-.tool-actions {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  gap: 5px;
+.query-dock form { margin: 0; }
+.query-dock label, .path-explainer strong, .compare-explainer strong { display: block; margin-bottom: 6px; font-weight: 700; }
+.search-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+.search-field > .ui-icon { z-index: 1; grid-area: 1 / 1; margin-left: 13px; color: var(--accent); pointer-events: none; }
+.search-field > input { grid-area: 1 / 1; padding-left: 41px; background: var(--surface); }
+.search-field > button { min-height: 46px; white-space: nowrap; }
+
+.path-search, .compare-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px 12px;
+}
+.path-search > svg, .swap-products { align-self: end; margin-bottom: 1px; color: var(--accent); }
+.path-search > svg { width: 19px; height: 19px; margin-bottom: 14px; }
+.swap-products { width: 44px; min-height: 44px; padding: 0; }
+.path-explainer, .compare-explainer { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
+.path-explainer strong, .compare-explainer strong { margin-bottom: 3px; color: var(--ink); }
+.query-dock svg, .tool-actions svg, .entity-actions svg, .type-list svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sample-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; margin-top: 9px; color: var(--muted); font-size: 13px; }
+.sample-row > span { margin-right: 4px; }
+.sample-row button {
+  min-height: 33px;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--wash);
+  color: var(--accent);
+  font-size: inherit;
+  text-align: left;
+}
+.sample-row button:not(:disabled):hover { border-color: var(--field-line); }
+.sample-row button:disabled { background: transparent; color: var(--muted); }
+
+.workspace { display: grid; grid-template-columns: 204px minmax(0, 1fr) minmax(282px, 314px); align-items: start; gap: 14px; }
+.workspace.filter-collapsed { grid-template-columns: minmax(0, 1fr) minmax(282px, 314px); }
+.workspace.detail-collapsed { grid-template-columns: 204px minmax(0, 1fr); }
+.workspace.filter-collapsed.detail-collapsed { grid-template-columns: minmax(0, 1fr); }
+.network-panel, .filter-panel, .detail-panel, .compare-workspace {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.network-panel:fullscreen { display: flex; flex-direction: column; border: 0; border-radius: 0; }
+.network-panel:fullscreen .graph-stage { flex: 1 1 auto; min-height: 0; border-radius: 0; }
+.network-panel:fullscreen .jump-detail { display: none; }
+.panel-heading {
+  display: flex;
+  min-height: 55px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 7px 15px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 750;
+}
+.panel-heading > div { display: flex; align-items: center; gap: 5px; }
+.panel-heading button {
+  min-width: 34px;
+  min-height: 36px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+.panel-heading button:last-child { font-size: 20px; font-weight: 500; }
+.panel-heading button:hover { background: var(--wash); }
+.detail-heading i, .type-list i { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; }
+.type-list { display: grid; gap: 5px; padding: 10px; }
+.type-list button {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
   padding: 6px;
-  transform: translateX(-50%);
-  border: 1px solid rgba(175, 191, 225, .22);
-  border-radius: 15px;
-  background: rgba(16, 28, 61, .86);
-  box-shadow: 0 18px 42px rgba(3,8,25,.3), inset 0 1px rgba(255,255,255,.04);
-  backdrop-filter: blur(18px);
-  pointer-events: auto;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--wash);
+  text-align: left;
 }
-.tool-actions button { border-color: transparent; background: transparent; color: #aab5ce; }
-.tool-actions button:hover { border-color: rgba(151, 170, 255, .24); background: rgba(114, 137, 248, .13); color: #dbe2ff; }
-.tool-actions span { color: #aab5ce; }
-.evidence-highlight-banner { position: absolute; z-index: 5; top: 76px; right: 16px; left: 16px; border: 1px solid rgba(231, 191, 90, .27); border-radius: 13px; background: rgba(49, 40, 15, .9); box-shadow: 0 12px 34px rgba(0,0,0,.24); }
-.evidence-highlight-banner span { color: #dfbd63; }
-.evidence-highlight-banner strong { color: #f3e7bd; }
-.evidence-highlight-banner button { border-color: rgba(232, 195, 99, .28); background: rgba(255,255,255,.04); color: #e5cb83; }
-.graph-stage, .graph-stage:fullscreen {
-  background:
-    radial-gradient(circle at 52% 46%, rgba(78, 101, 205, .26), transparent 28rem),
-    radial-gradient(circle at 84% 12%, rgba(55, 137, 190, .14), transparent 24rem),
-    linear-gradient(145deg, #0b1630 0%, #101d3d 48%, #081126 100%);
-}
-.network-grid {
-  opacity: .58;
-  background-image:
-    radial-gradient(circle, rgba(190, 201, 255, .52) 0 1px, transparent 1.4px),
-    radial-gradient(circle, rgba(115, 184, 225, .34) 0 1px, transparent 1.4px),
-    linear-gradient(rgba(148, 164, 225, .03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 164, 225, .03) 1px, transparent 1px);
-  background-position: 0 0, 42px 66px, 0 0, 0 0;
-  background-size: 132px 132px, 181px 181px, 34px 34px, 34px 34px;
-  mask-image: radial-gradient(circle at center, #000 18%, rgba(0,0,0,.68) 66%, transparent 100%);
-}
-.svg-edge line { stroke: rgba(131, 151, 220, .38); stroke-width: 1.25; }
-.svg-edge text { fill: #a6b3d3; stroke: rgba(8, 17, 38, .94); stroke-width: 5px; }
-.svg-edge.focused line { stroke: rgba(145, 164, 255, .86); stroke-width: 2.1; filter: drop-shadow(0 0 4px rgba(99, 124, 242, .38)); }
-.svg-edge.dimmed, .svg-node.dimmed { opacity: .1; }
-.svg-edge.evidence line { stroke: #e2b84f; filter: drop-shadow(0 0 5px rgba(226,184,79,.5)); }
-.svg-edge.evidence text { fill: #f0cc70; }
-.svg-node .node-core { filter: drop-shadow(0 5px 10px rgba(0,0,0,.34)); }
-.svg-node .node-halo { opacity: .72; stroke-width: 2; stroke-dasharray: 3 5; filter: url(#graph-node-glow); }
-.svg-node.center .node-core { stroke: #9baaff; stroke-width: 3; }
-.svg-node.selected .node-core, .svg-node:focus-visible .node-core { stroke: #d9e0ff; stroke-width: 4; filter: drop-shadow(0 0 12px rgba(118, 142, 255, .62)); }
-.svg-node:hover .node-core { stroke-width: 3; filter: drop-shadow(0 0 9px rgba(118, 142, 255, .42)); }
-.svg-node.evidence .node-core { stroke: #e7bd54; filter: drop-shadow(0 0 10px rgba(226,184,79,.56)); }
-.svg-node text { fill: #edf1ff; stroke: rgba(7, 15, 34, .96); stroke-width: 5px; font-size: 9px; }
-.svg-node.center text:not(.image-label) { fill: #fff; stroke: rgba(7, 15, 34, .94); }
-.svg-node text.image-label { transform: translateY(39px); }
-.svg-node text.image-label.center-label { transform: translateY(54px); }
-.canvas-state { background: rgba(9, 18, 41, .78); color: #f1f4ff; backdrop-filter: blur(7px); }
-.canvas-state > svg { stroke: #8493bd; }
-.canvas-state p { color: #9da8c3; }
-.canvas-state button { background: #4f6ef7; }
-.loader { border-color: rgba(142, 159, 218, .22); border-top-color: #8fa2ff; }
-.seed-graph strong { background: #4f6ef7; box-shadow: 0 0 35px rgba(79, 110, 247, .28); }
-.seed-graph i { border-color: #60709c; background: #162347; }
-.seed-graph i::after { background: #46577f; }
-.truncate-badge, .expand-status { border-color: rgba(176,190,225,.22); background: rgba(17, 29, 62, .9); color: #b1bdd8; }
-.detail-panel { box-shadow: -14px 0 36px rgba(35,48,82,.06); }
-.entity-summary { grid-template-columns: 1fr; align-items: start; gap: 12px; padding: 15px; }
-.entity-image { width: 100%; height: 138px; border-color: var(--line); border-radius: 14px; background: #eef1f7; }
-.entity-identity span { background: #eef2ff; color: #4963d4; }
-.entity-identity h2 { color: #172033; font-size: 18px; }
-.entity-actions button { border-color: var(--line); background: #fff; color: #56627a; }
-.entity-actions button:first-child { border-color: #4f6ef7; background: #4f6ef7; color: #fff; }
-.detail-tabs { border-color: var(--line); background: #eef1f6; }
-.detail-tabs button { color: #667085; }
-.detail-tabs button.active { background: #fff; box-shadow: 0 2px 7px rgba(35,48,82,.08); color: #3654d8; }
-.detail-tabs button span { color: #8993a6; }
-.detail-scroll { scrollbar-color: #c7d0e0 transparent; }
-.relation-list button { border-bottom-color: var(--line); color: #39445b; }
-.relation-list button:hover span { color: #3654d8; }
-.relation-list button small { background: #eef1f6; color: #69758b; }
-.property-item, .evidence-panel dl div { border-bottom-color: var(--line); }
-.property-list dt, .evidence-panel dt { color: #7a8497; }
-.property-list dd, .evidence-panel dd { color: #39445b; }
-.property-list dd button, .property-list a, .evidence-panel > a { color: #3654d8; }
-.evidence-status { border-color: #e1e6f0; background: #f5f7fb; }
-.evidence-status span { color: #7a8497; }
-.evidence-status strong { color: #34425e; }
-.evidence-panel > p, .no-properties, .detail-empty p { color: #7a8497; }
-.detail-empty svg { stroke: #8d98ad; }
-.compare-workspace { border-color: var(--line); background: #f8f9fc; box-shadow: 0 20px 54px rgba(35,48,82,.1); color: #172033; }
-.compare-state { color: #26324a; }
-.compare-state p { color: #7a8497; }
-.compare-state button { background: #4f6ef7; }
-.product-card, .comparison-block { border-color: var(--line); background: #fff; }
-.product-card > span, .product-card p, .comparison-title p { color: #7a8497; }
-.product-card button, .comparison-actions button { border-color: var(--line); background: #fff; color: #4b5870; }
-.product-card button:hover, .comparison-actions button:hover { border-color: #9bacf7; color: #3654d8; }
-.comparison-actions button:first-child { border-color: #4f6ef7; background: #4f6ef7; color: #fff; }
-.comparison-score { background: #203264; }
-.comparison-title, .relation-comparison article + article, .comparison-row { border-color: var(--line); }
-.comparison-title span { color: #4f6ef7; }
-.comparison-row > * { color: #39445b; }
-.comparison-row.heading, .relation-diff-grid > div { background: #f6f7fa; }
-.comparison-row.heading span, .relation-diff-grid strong, .relation-comparison article > header span { color: #7a8497; }
-.relation-diff-grid > div { border-color: var(--line); }
-.relation-diff-grid span { background: #edf0f5; color: #56627a; }
-.relation-diff-grid span.common { background: #eef2ff; color: #3654d8; }
+.type-list button:hover { border-color: var(--field-line); }
+.type-list button.inactive { background: transparent; }
+.type-list button.inactive svg { visibility: hidden; }
+.type-list strong, .type-list small { display: block; }
+.type-list strong { font-size: 13px; }
+.type-list small { color: var(--muted); font-size: 12px; }
+.type-list svg { width: 15px; height: 15px; color: var(--accent); }
+.filter-empty, .detail-empty { display: grid; gap: 9px; justify-items: start; padding: 18px 15px; color: var(--muted); font-size: 14px; }
+.detail-empty svg { width: 30px; height: 30px; }
+.coverage-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 14px; border-top: 1px solid var(--line); gap: 10px; }
+.coverage-strip > div { display: grid; }
+.coverage-strip strong { color: var(--accent); font-size: 17px; font-variant-numeric: tabular-nums; }
+.coverage-strip span, .coverage-strip p { color: var(--muted); font-size: 12px; }
+.coverage-strip p { grid-column: 1 / -1; }
+.interaction-help { padding: 11px 14px 14px; border-top: 1px solid var(--line); font-size: 12px; }
+.interaction-help > p { margin-bottom: 6px; font-weight: 700; }
+.interaction-help dl > div { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.interaction-help dd { color: var(--muted); }
 
-/* Editorial graph workspace: warm application shell, focused cosmic canvas. */
-.graph-page {
-  --ink: #171827;
-  --muted: #6f7180;
-  --line: rgba(72, 74, 104, .14);
-  --glass: rgba(252, 251, 248, .92);
-  --glass-strong: #faf9f6;
-  --accent: #7468e8;
-  --accent-strong: #5e52d4;
-  --coral: #f3a477;
-  --canvas: #0b0d20;
-  max-width: none;
+.network-toolbar {
+  display: flex;
+  min-height: 55px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 6px 12px 6px 16px;
+  border-bottom: 1px solid var(--line);
 }
-.graph-page button,
-.graph-page input,
-.graph-page a { transition: color .18s ease, border-color .18s ease, background-color .18s ease, box-shadow .18s ease, opacity .18s ease; }
-.graph-page button:focus-visible,
-.graph-page input:focus-visible,
-.graph-page a:focus-visible { outline-color: var(--accent); box-shadow: 0 0 0 5px rgba(116, 104, 232, .13); }
-.page-intro { min-height: 48px; align-items: center; padding: 0 2px 10px; }
-.page-intro > div:first-child { min-width: 0; }
-.page-intro p { display: flex; align-items: center; gap: 7px; margin: 0 0 3px; color: #7770da; font-size: 8px; letter-spacing: .2em; }
-.page-intro p i { width: 5px; height: 5px; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 5px rgba(243, 164, 119, .14); }
-.intro-title { display: flex; min-width: 0; align-items: baseline; gap: 14px; }
-.page-intro h1 { flex: 0 0 auto; color: var(--ink); font-size: clamp(20px, 1.65vw, 27px); letter-spacing: -.04em; }
-.page-intro span { min-width: 0; margin: 0; overflow: hidden; color: #747583; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.mode-switch { gap: 3px; padding: 3px; border-color: var(--line); border-radius: 13px; background: rgba(255, 255, 255, .78); box-shadow: 0 8px 26px rgba(38, 34, 76, .06); backdrop-filter: blur(16px); }
-.mode-switch button { min-height: 34px; padding: 6px 12px; border-radius: 10px; color: #6c6d7a; font-size: 11px; }
-.mode-switch button:hover { color: #5146c4; }
-.mode-switch button.active { background: #ebe9ff; color: #5b4ed0; box-shadow: inset 0 0 0 1px rgba(116, 104, 232, .12); }
-.query-dock { position: relative; z-index: 3; max-width: 1180px; margin: 0 auto 10px; }
-.query-dock .search-bar,
-.query-dock .path-search,
-.query-dock .compare-search { max-width: none; margin: 0; border-color: rgba(91, 91, 126, .16); border-radius: 16px; background: rgba(255, 255, 255, .9); box-shadow: 0 15px 38px rgba(34, 31, 68, .08); backdrop-filter: blur(18px); }
-.query-dock .search-bar { min-height: 48px; }
-.query-dock .search-bar input { height: 46px; color: var(--ink); }
-.query-dock .search-bar > svg { width: 18px; margin-left: 17px; color: #898a99; }
-.query-dock .search-bar:focus-within { border-color: rgba(116, 104, 232, .58); box-shadow: 0 0 0 4px rgba(116, 104, 232, .09), 0 15px 38px rgba(34, 31, 68, .08); }
-.search-bar button,
-.path-search > button,
-.compare-search > button:last-child { background: linear-gradient(135deg, #7668eb, #6456d9); }
-.search-bar button:hover:not(:disabled),
-.path-search > button:hover:not(:disabled),
-.compare-search > button:last-child:hover:not(:disabled) { background: linear-gradient(135deg, #695bdd, #5548c3); }
-.path-explainer strong,
-.compare-explainer strong { color: #6256d2; }
-.path-search input,
-.compare-search input,
-.compare-search .swap-products { border-color: var(--line); background: #f6f4f1; }
-.sample-row { min-height: 33px; justify-content: flex-start; gap: 6px; padding: 5px 2px 0; }
-.sample-row > span { color: #858691; font-size: 10px; }
-.sample-row button { min-height: 27px; padding: 5px 10px; border-color: transparent; background: rgba(255, 255, 255, .58); color: #686a78; font-size: 10px; }
-.sample-row button:hover { border-color: rgba(116, 104, 232, .24); background: #f0eeff; color: #5d51cb; }
-.workspace {
-  grid-template-columns: 204px minmax(560px, 1fr) 306px;
-  height: clamp(560px, calc(100dvh - 218px), 880px);
-  border-color: rgba(57, 57, 86, .18);
-  border-radius: 22px;
+.result-summary { min-width: 0; overflow-wrap: anywhere; }
+.result-summary h2 { font-size: 16px; }
+.result-summary p, .result-summary > span { color: var(--muted); font-size: 13px; }
+.result-summary.path-result { flex-basis: 100%; padding-block: 7px; }
+.path-result ol { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 5px; padding-left: 20px; color: var(--accent); font-size: 13px; }
+.path-result li { padding-right: 10px; }
+.path-result li small { margin-inline: 6px; padding: 2px 3px; color: var(--muted); font-size: 12px; }
+.tool-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; color: var(--muted); }
+.tool-actions > span { min-width: 4ch; text-align: center; font: 12px/1.4 var(--mono); }
+.tool-actions button, .evidence-highlight-banner button {
+  display: inline-flex;
+  min-width: 34px;
+  min-height: 36px;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+.tool-actions button:disabled { color: var(--muted); opacity: .58; }
+.tool-actions button:not(:disabled):hover, .evidence-highlight-banner button:hover { border-color: var(--field-line); }
+.tool-actions button[aria-expanded="true"] { border-color: var(--line); background: var(--tint); }
+.tool-actions svg { width: 16px; height: 16px; }
+.evidence-highlight-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--tint);
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.evidence-highlight-banner span { display: block; font-size: 12px; }
+.evidence-highlight-banner strong { display: block; font-size: 14px; }
+.evidence-highlight-banner button { flex: 0 0 auto; border-color: var(--field-line); }
+
+.graph-stage {
+  position: relative;
+  isolation: isolate;
+  min-height: clamp(398px, 57vh, 620px);
+  overflow: hidden;
+  border-radius: 0 0 var(--radius) var(--radius);
   background: var(--canvas);
-  box-shadow: 0 28px 80px rgba(25, 22, 54, .18), 0 2px 10px rgba(25, 22, 54, .05);
 }
-.workspace.filter-collapsed { grid-template-columns: minmax(560px, 1fr) 306px; }
-.workspace.detail-collapsed { grid-template-columns: 204px minmax(560px, 1fr); }
-.workspace.filter-collapsed.detail-collapsed { grid-template-columns: minmax(560px, 1fr); }
-.filter-panel,
-.detail-panel { background: var(--glass-strong); }
-.filter-panel { border-right-color: var(--line); }
-.detail-panel { border-left-color: var(--line); box-shadow: -18px 0 44px rgba(7, 8, 24, .1); }
-.panel-heading { min-height: 52px; padding: 10px 14px; border-bottom-color: var(--line); }
-.panel-heading > span { color: #323341; font-size: 11px; letter-spacing: .05em; }
-.panel-heading button { color: #6659d7; }
-.type-list { gap: 3px; padding: 8px; }
-.type-list button { min-height: 44px; padding: 7px 8px; border-radius: 12px; color: #454653; }
-.type-list button:hover { border-color: rgba(116, 104, 232, .1); background: #efedff; }
-.type-list strong { font-size: 11px; }
-.type-list small { color: #898a95; }
-.interaction-help { padding: 13px; border-top-color: var(--line); background: #f2f0ec; }
-.interaction-help > p { margin-bottom: 7px; color: #666774; font-size: 10px; }
-.interaction-help dl { gap: 5px; }
-.interaction-help dl div { font-size: 10px; }
-.network-panel { isolation: isolate; background: var(--canvas); }
-.network-panel::before { position: absolute; z-index: 0; top: -25%; left: 8%; width: 52%; height: 60%; border-radius: 50%; background: rgba(116, 104, 232, .12); filter: blur(80px); content: ''; pointer-events: none; }
-.network-toolbar { inset: 14px; }
-.result-summary { position: relative; max-width: min(360px, calc(100% - 96px)); padding: 10px 13px 10px 16px; overflow: hidden; border-color: rgba(186, 184, 233, .17); border-radius: 14px; background: rgba(21, 22, 48, .74); box-shadow: 0 14px 40px rgba(2, 3, 14, .25), inset 0 1px rgba(255, 255, 255, .05); backdrop-filter: blur(22px) saturate(1.15); }
-.result-summary::before { position: absolute; top: 11px; bottom: 11px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(#8d82f8, #efaa80); content: ''; }
-.result-summary strong { color: #f6f5ff; font-size: 12px; }
-.result-summary span { margin-top: 3px; color: #aaa9bf; font-size: 10px; }
-.result-summary.path-result { max-width: min(560px, calc(100% - 88px)); }
-.result-summary .result-eyebrow { color: #aea5ff; }
-.result-summary.path-result p { color: #d7d5e5; }
-.result-summary.path-result li small { background: rgba(134, 119, 241, .16); color: #c5bdff; }
-.tool-actions { bottom: 0; gap: 3px; padding: 5px; border-color: rgba(190, 187, 233, .17); border-radius: 16px; background: rgba(18, 19, 42, .78); box-shadow: 0 18px 50px rgba(0, 1, 12, .42), inset 0 1px rgba(255,255,255,.05); backdrop-filter: blur(22px) saturate(1.15); }
-.tool-actions button { width: 38px; height: 38px; border-radius: 11px; color: #b0aec3; }
-.tool-actions button:hover { border-color: rgba(166, 153, 249, .2); background: rgba(129, 113, 236, .14); color: #e2deff; }
-.tool-actions span { color: #aaa9bc; }
-.graph-stage,
-.graph-stage:fullscreen {
-  background:
-    radial-gradient(circle at 49% 43%, rgba(123, 107, 238, .23), transparent 25rem),
-    radial-gradient(circle at 13% 78%, rgba(243, 164, 119, .08), transparent 24rem),
-    radial-gradient(circle at 88% 14%, rgba(100, 197, 213, .09), transparent 25rem),
-    linear-gradient(145deg, #0b0d20 0%, #11142f 54%, #090b1b 100%);
+.network-grid { position: absolute; inset: 0; background-image: radial-gradient(#d1dac8 1px, transparent 1px); background-size: 20px 20px; pointer-events: none; }
+.cy-canvas { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; cursor: grab; touch-action: none; }
+.cy-canvas:active { cursor: grabbing; }
+.graph-orbits { fill: none; stroke: #d7dfce; stroke-width: 1; stroke-dasharray: 3 6; pointer-events: none; }
+#graph-edge-arrow path { fill: #647d68; }
+.svg-edge { pointer-events: none; }
+.svg-edge line { stroke: #8b9e8b; stroke-width: 1.6; }
+.svg-edge text { fill: var(--muted); stroke: var(--canvas); stroke-width: 3px; paint-order: stroke; text-anchor: middle; font-size: 11px; font-weight: 700; }
+.svg-edge.focused line { stroke: var(--accent); stroke-width: 2.5; }
+.svg-edge.evidence line { stroke: #46602c; stroke-width: 4; }
+.svg-edge.evidence text { fill: #294c25; font-weight: 800; }
+.svg-edge.dimmed { opacity: .28; }
+.svg-node { cursor: pointer; outline: none; }
+.svg-node.dimmed { opacity: .43; }
+.svg-node:is(:focus-visible, :hover, .selected, .evidence) { opacity: 1; }
+.node-backplate { opacity: .16; }
+.node-core { stroke-width: 2; }
+.node-halo { stroke-width: 1.2; opacity: .65; }
+.svg-node.selected .node-core, .svg-node.evidence .node-core { stroke-width: 4; }
+.svg-node:focus-visible .node-core { stroke: var(--ink); stroke-width: 5; }
+.node-glyph { text-anchor: middle; dominant-baseline: central; font-size: 25px; font-weight: 800; }
+.center .node-glyph { font-size: 34px; }
+.node-label-bg { fill: var(--surface); stroke: #c0cdbd; }
+.selected .node-label-bg, .evidence .node-label-bg { fill: var(--tint); stroke: var(--node-color); }
+.svg-node:focus-visible .node-label-bg { stroke: var(--ink); stroke-width: 2.5; }
+.node-caption { fill: var(--ink); text-anchor: middle; font-size: 12px; font-weight: 700; }
+.canvas-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
 }
-.network-grid {
-  opacity: .5;
-  background-image:
-    radial-gradient(circle, rgba(209, 203, 255, .55) 0 1px, transparent 1.5px),
-    radial-gradient(circle, rgba(105, 196, 211, .35) 0 1px, transparent 1.5px);
-  background-position: 0 0, 53px 71px;
-  background-size: 157px 157px, 223px 223px;
-  mask-image: radial-gradient(ellipse at center, #000 15%, rgba(0,0,0,.64) 67%, transparent 100%);
+.canvas-state > svg, .detail-empty > svg { width: 39px; height: 39px; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; color: var(--accent); }
+.canvas-state h2 { font-size: 19px; }
+.canvas-state p { max-width: 420px; color: var(--muted); font-size: 14px; }
+.error-state h2, .error-state > svg, .error-state > strong { color: var(--danger); }
+.expand-status, .truncate-badge {
+  position: absolute;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 12px;
 }
-.graph-orbits circle { fill: none; stroke: rgba(176, 166, 247, .12); stroke-width: 1; stroke-dasharray: 2 11; vector-effect: non-scaling-stroke; }
-.graph-orbits circle:first-child { stroke: rgba(243, 164, 119, .18); }
-.graph-orbits circle:last-child { stroke: rgba(100, 197, 213, .09); }
-#graph-edge-arrow path { fill: #7278ad; }
-.svg-edge { transition-duration: .22s; }
-.svg-edge line { stroke: rgba(139, 145, 205, .34); stroke-width: 1.25; stroke-dasharray: 900; stroke-dashoffset: 900; animation: edge-draw .7s cubic-bezier(.22,.61,.36,1) forwards; }
-.svg-edge text { fill: #b8b6cc; stroke: rgba(10, 11, 29, .95); stroke-width: 4px; font-size: 8px; letter-spacing: .02em; }
-.svg-edge.focused line { stroke: rgba(172, 159, 255, .92); stroke-width: 2.15; filter: drop-shadow(0 0 5px rgba(133, 116, 244, .46)); }
-.svg-edge.dimmed,
-.svg-node.dimmed { opacity: .08; }
-.svg-node { opacity: 0; animation: node-arrive .44s cubic-bezier(.22,.78,.31,1) forwards; animation-delay: var(--node-delay); }
-.svg-node .node-backplate { opacity: .13; }
-.svg-node .node-core { stroke-width: 2; filter: drop-shadow(0 7px 14px rgba(0, 0, 0, .38)); }
-.svg-node .node-halo { opacity: .78; stroke-width: 1.6; stroke-dasharray: 2 6; filter: url(#graph-node-glow); animation: halo-breathe 3.8s ease-in-out infinite; }
-.svg-node.center .node-core { stroke: #a99eff; stroke-width: 3; }
-.svg-node.selected .node-core,
-.svg-node:focus-visible .node-core { stroke: #f2efff; stroke-width: 4; filter: drop-shadow(0 0 15px rgba(143, 125, 248, .68)); }
-.svg-node:hover .node-core { stroke-width: 3; filter: drop-shadow(0 0 12px rgba(143, 125, 248, .52)); }
-.svg-node image { filter: saturate(.88) contrast(1.04) brightness(.94); }
-.svg-node .node-label-bg { fill: rgba(15, 16, 38, .88); stroke: rgba(190, 184, 239, .17); stroke-width: 1; vector-effect: non-scaling-stroke; filter: drop-shadow(0 6px 12px rgba(0, 0, 0, .22)); }
-.svg-node text.node-glyph { fill: var(--node-color); stroke: none; font-size: 12px; font-weight: 850; letter-spacing: 0; }
-.svg-node.center text.node-glyph { font-size: 16px; }
-.svg-node text.node-caption,
-.svg-node.center text.node-caption { fill: #f7f5ff; stroke: none; font-size: 9px; font-weight: 700; letter-spacing: .01em; }
-.svg-node.evidence .node-core { stroke: #efc265; filter: drop-shadow(0 0 12px rgba(239, 194, 101, .62)); }
-.entity-summary { grid-template-columns: 1fr; gap: 10px; padding: 13px 14px; }
-.entity-image { height: 112px; border-color: var(--line); border-radius: 13px; background: #efede8; }
-.entity-identity span { background: #ece9ff; color: #6154ce; }
-.entity-identity h2 { color: #20212e; font-size: 17px; }
-.entity-actions { gap: 7px; }
-.entity-actions button { border-color: var(--line); border-radius: 10px; background: #fff; color: #656674; }
-.entity-actions button:first-child { border-color: var(--accent); background: var(--accent); color: #fff; }
-.detail-tabs { border-color: var(--line); border-radius: 11px; background: #eeece8; }
-.detail-tabs button { color: #747581; }
-.detail-tabs button.active { color: #594dcc; }
-.relation-list button:hover span,
-.property-list dd button,
-.property-list a,
-.evidence-panel > a { color: #5e52d4; }
-.evidence-status { border-color: var(--line); background: #f2f0ec; }
+.truncate-badge { right: 12px; }
+.expand-status { left: 12px; z-index: 1; }
+.expand-status.error { color: var(--danger); }
+.mini-loader { width: 11px; height: 11px; border: 2px solid var(--field-line); border-top-color: var(--accent); border-radius: 50%; animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.jump-detail { display: none; }
+.graph-skip:focus-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 8px;
+  padding: 7px;
+  clip-path: none;
+  border: 0;
+  border-radius: 5px;
+  background: var(--wash);
+  color: var(--accent);
+}
 
-/* Match the product landing page: dark evidence workspace with green/cyan signals. */
-.graph-page {
-  --ink: #edf7f1;
-  --muted: #91a79c;
-  --line: rgba(181,231,203,.14);
-  --glass: rgba(11,27,21,.93);
-  --glass-strong: #0c1914;
-  --accent: #a4ffcb;
-  --accent-strong: #75dda0;
-  --coral: #ffb27b;
-  --canvas: #07110e;
-  color: var(--ink);
+.entity-summary { padding: 13px 15px 0; }
+.entity-image { display: grid; height: 132px; place-items: center; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--control-radius); background: var(--wash); }
+.entity-image img { width: 100%; height: 100%; max-height: 130px; object-fit: contain; }
+.entity-identity span { color: var(--accent); font-size: 12px; font-weight: 700; }
+.entity-identity h2 { margin-top: 3px; font-size: 19px; overflow-wrap: anywhere; }
+.entity-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 15px; }
+.entity-actions .ui-button { min-height: 38px; gap: 4px; padding-inline: 8px; font-size: 13px; }
+.entity-actions svg { width: 15px; height: 15px; }
+.detail-tabs { display: flex; margin: 0 12px; border-bottom: 1px solid var(--line); }
+.detail-tabs button {
+  min-width: 0;
+  min-height: 39px;
+  flex: 1;
+  padding: 4px 3px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
 }
-.page-intro p { color: #a4ffcb; }
-.page-intro p i { background: #7be5ff; box-shadow: 0 0 0 5px rgba(123,229,255,.1), 0 0 13px rgba(123,229,255,.4); }
-.page-intro h1 { color: #edf7f1; }
-.page-intro span { color: #91a79c; }
-.mode-switch { border-color: var(--line); background: rgba(12,25,20,.88); box-shadow: 0 10px 28px rgba(0,0,0,.14); }
-.mode-switch button { color: #91a79c; }
-.mode-switch button:hover { color: #d8e9df; }
-.mode-switch button.active { background: rgba(164,255,203,.11); color: #a4ffcb; box-shadow: inset 0 0 0 1px rgba(164,255,203,.12); }
-.query-dock .search-bar,
-.query-dock .path-search,
-.query-dock .compare-search { border-color: var(--line); background: rgba(12,25,20,.92); box-shadow: 0 15px 38px rgba(0,0,0,.18); }
-.query-dock .search-bar input,
-.path-search input,
-.compare-search input { background: transparent; color: #edf7f1; }
-.query-dock input::placeholder { color: #61776c; }
-.query-dock .search-bar > svg,
-.path-search > svg { color: #7e9589; stroke: currentColor; }
-.query-dock .search-bar:focus-within,
-.path-search input:focus,
-.compare-search input:focus { border-color: rgba(164,255,203,.54); box-shadow: 0 0 0 4px rgba(164,255,203,.08), 0 15px 38px rgba(0,0,0,.18); }
-.search-bar button,
-.path-search > button,
-.compare-search > button:last-child { background: #a4ffcb; color: #07110e; }
-.search-bar button:hover:not(:disabled),
-.path-search > button:hover:not(:disabled),
-.compare-search > button:last-child:hover:not(:disabled) { background: #d3ffe5; }
-.path-search label,
-.compare-search label,
-.path-search .path-explainer,
-.compare-explainer { color: #81978c; }
-.path-explainer strong,
-.compare-explainer strong { color: #a4ffcb; }
-.path-search input,
-.compare-search input,
-.compare-search .swap-products { border-color: var(--line); background: #10231b; color: #d8e9df; }
-.sample-row > span { color: #71877c; }
-.sample-row button { border-color: rgba(164,255,203,.08); background: rgba(164,255,203,.035); color: #91a79c; }
-.sample-row button:hover { border-color: rgba(164,255,203,.3); background: rgba(164,255,203,.08); color: #a4ffcb; }
-.coverage-strip { border-color: var(--line); background: rgba(12,25,20,.92); }
-.coverage-strip > div { border-right-color: var(--line); }
-.coverage-strip strong { color: #a4ffcb; }
-.coverage-strip span,
-.coverage-strip p { color: #81978c; }
-.workspace { border-color: rgba(181,231,203,.18); background: #07110e; box-shadow: 0 28px 80px rgba(0,0,0,.32), 0 2px 10px rgba(0,0,0,.16); }
-.filter-panel,
-.detail-panel { background: #0c1914; color: #d9e9df; }
-.filter-panel { border-right-color: var(--line); }
-.detail-panel { border-left-color: var(--line); box-shadow: -18px 0 44px rgba(0,0,0,.16); }
-.panel-heading { border-bottom-color: var(--line); }
-.panel-heading > span { color: #d9e9df; }
-.panel-heading button { color: #a4ffcb; }
-.type-list button { color: #bdcec4; }
-.type-list button:hover { border-color: rgba(164,255,203,.1); background: rgba(164,255,203,.055); }
-.type-list small,
-.filter-empty { color: #71877c; }
-.interaction-help { border-top-color: var(--line); background: #0a1612; }
-.interaction-help > p,
-.interaction-help dt { color: #91a79c; }
-.interaction-help dd { color: #61776c; }
-.network-panel { background: #07110e; }
-.network-panel::before { background: rgba(72,196,128,.1); }
-.result-summary { border-color: rgba(164,255,203,.16); background: rgba(8,26,19,.78); }
-.result-summary::before { background: linear-gradient(#a4ffcb, #7be5ff); }
-.result-summary strong { color: #edf7f1; }
-.result-summary span { color: #91a79c; }
-.result-summary .result-eyebrow { color: #a4ffcb; }
-.result-summary.path-result p { color: #c9d9cf; }
-.result-summary.path-result li small { background: rgba(164,255,203,.1); color: #a4ffcb; }
-.tool-actions { border-color: rgba(164,255,203,.16); background: rgba(8,24,18,.82); }
-.tool-actions button { color: #91a79c; }
-.tool-actions button:hover { border-color: rgba(164,255,203,.2); background: rgba(164,255,203,.1); color: #a4ffcb; }
-.tool-actions span { color: #71877c; }
-.graph-stage,
-.graph-stage:fullscreen {
-  background:
-    radial-gradient(circle at 49% 43%, rgba(72,196,128,.18), transparent 25rem),
-    radial-gradient(circle at 14% 78%, rgba(123,229,255,.065), transparent 24rem),
-    radial-gradient(circle at 88% 14%, rgba(164,255,203,.055), transparent 25rem),
-    linear-gradient(145deg, #07110e 0%, #0a1913 54%, #060d0b 100%);
+.detail-tabs button:hover, .detail-tabs .active { color: var(--accent); }
+.detail-tabs .active { border-bottom-color: var(--accent); }
+.detail-tabs span { font-variant-numeric: tabular-nums; }
+.detail-scroll { max-height: 394px; padding: 4px 13px 12px; overflow-y: auto; }
+.detail-scroll [role="tabpanel"]:focus-visible, .comparison-table:focus-visible { outline-offset: -2px; }
+.relation-list button {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
-.network-grid { background-image: radial-gradient(circle, rgba(164,255,203,.42) 0 1px, transparent 1.5px), radial-gradient(circle, rgba(123,229,255,.25) 0 1px, transparent 1.5px); }
-.graph-orbits circle { stroke: rgba(164,255,203,.12); }
-.graph-orbits circle:first-child { stroke: rgba(123,229,255,.14); }
-.graph-orbits circle:last-child { stroke: rgba(255,178,123,.08); }
-#graph-edge-arrow path { fill: #5f8f78; }
-.svg-edge line { stroke: rgba(116,169,143,.36); }
-.svg-edge text { fill: #a6bbae; stroke: rgba(5,17,12,.95); }
-.svg-edge.focused line { stroke: rgba(164,255,203,.9); filter: drop-shadow(0 0 5px rgba(164,255,203,.36)); }
-.svg-node.center .node-core { stroke: #a4ffcb; }
-.svg-node.selected .node-core,
-.svg-node:focus-visible .node-core { stroke: #edf7f1; filter: drop-shadow(0 0 15px rgba(164,255,203,.55)); }
-.svg-node:hover .node-core { filter: drop-shadow(0 0 12px rgba(164,255,203,.42)); }
-.svg-node .node-label-bg { fill: rgba(7,20,15,.9); stroke: rgba(164,255,203,.16); }
-.svg-node text.node-caption,
-.svg-node.center text.node-caption { fill: #edf7f1; }
-.canvas-state { background: rgba(7,17,14,.72); color: #edf7f1; }
-.canvas-state > svg { stroke: #91a79c; }
-.canvas-state p { color: #81978c; }
-.loader { border-color: rgba(164,255,203,.14); border-top-color: #a4ffcb; }
-.entity-image { border-color: var(--line); background: #10231b; }
-.entity-identity span { background: rgba(164,255,203,.1); color: #a4ffcb; }
-.entity-identity h2 { color: #edf7f1; }
-.entity-actions button { border-color: var(--line); background: #10231b; color: #a9bdb2; }
-.entity-actions button:first-child { border-color: #a4ffcb; background: #a4ffcb; color: #07110e; }
-.detail-tabs { border-color: var(--line); background: #10231b; }
-.detail-tabs button { color: #81978c; }
-.detail-tabs button.active,
-.relation-list button:hover span,
-.property-list dd button,
-.property-list a,
-.evidence-panel > a { color: #a4ffcb; }
-.property-list,
-.relation-list,
-.evidence-panel { color: #b8cabf; }
-.property-list dt,
-.relation-list small { color: #71877c; }
-.evidence-status { border-color: var(--line); background: #10231b; }
-.compare-workspace,
-.product-card,
-.comparison-block { border-color: var(--line); background: #0c1914; color: #edf7f1; }
-.product-card p,
-.comparison-title p,
-.compare-state p { color: #81978c; }
-.comparison-score { background: #102b20; color: #edf7f1; }
-.comparison-score strong { color: #a4ffcb; }
-.comparison-actions button,
-.product-card button { border-color: var(--line); background: #10231b; color: #a4ffcb; }
-.comparison-actions button:first-child { border-color: #a4ffcb; background: #a4ffcb; color: #07110e; }
-.comparison-title,
-.relation-comparison article + article,
-.comparison-row { border-color: var(--line); }
-.comparison-title span { color: #a4ffcb; }
-.comparison-row > * { color: #b8cabf; }
-.comparison-row.heading,
-.relation-diff-grid > div { background: #10231b; }
-.comparison-row.heading span,
-.relation-diff-grid strong,
-.relation-comparison article > header span { color: #81978c; }
-.relation-diff-grid > div { border-color: var(--line); }
-.relation-diff-grid span { background: #152a21; color: #a9bdb2; }
-.relation-diff-grid span.common { background: rgba(164,255,203,.11); color: #a4ffcb; }
-@keyframes edge-draw { to { stroke-dashoffset: 0; } }
-@keyframes node-arrive { from { opacity: 0; } to { opacity: 1; } }
-@keyframes halo-breathe { 0%, 100% { opacity: .48; } 50% { opacity: .9; } }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-@media (max-width: 1180px) {
-  .workspace { grid-template-columns: 188px minmax(460px,1fr) 282px; }
-  .workspace.filter-collapsed { grid-template-columns: minmax(460px,1fr) 282px; }
-  .workspace.detail-collapsed { grid-template-columns: 188px minmax(460px,1fr); }
+.relation-list button:hover { background: var(--wash); }
+.relation-list button small { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: var(--wash); color: var(--accent); font-size: 11px; }
+.property-list dt, .evidence-panel dt { color: var(--muted); font-size: 12px; }
+.property-list dl > div, .evidence-panel dl > div { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.property-list dd, .evidence-panel dd { font-size: 14px; overflow-wrap: anywhere; }
+.property-list dd span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.property-list dd span.expanded { display: block; }
+.property-list button, .property-list a { padding: 4px 0; border: 0; background: transparent; color: var(--accent); font-size: 13px; font-weight: 750; text-decoration: underline; }
+.evidence-status { margin-top: 7px; padding: 9px; border-radius: 6px; background: var(--wash); color: var(--accent); font-size: 14px; overflow-wrap: anywhere; }
+.evidence-panel > a, .evidence-panel > p { display: block; margin-top: 8px; font-size: 13px; }
+.no-properties { padding: 12px 4px; color: var(--muted); font-size: 14px; }
+
+.compare-workspace { padding: 18px; }
+.compare-state { display: grid; min-height: 196px; align-content: center; justify-items: start; gap: 8px; padding: 12px; }
+.compare-state > p { color: var(--muted); }
+.comparison-header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; gap: 12px; }
+.product-card { min-width: 0; padding: 15px; border-radius: var(--control-radius); background: var(--wash); overflow-wrap: anywhere; }
+.product-card > span { color: var(--muted); font-size: 13px; }
+.product-card h2 { margin-block: 3px; font-size: 20px; }
+.product-card p { margin-bottom: 10px; }
+.comparison-score { display: grid; align-content: center; min-width: 110px; padding: 8px; text-align: center; }
+.comparison-score strong { color: var(--accent); font-size: 27px; }
+.comparison-score span, .comparison-score small { color: var(--muted); font-size: 13px; }
+.comparison-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 16px 22px; }
+.comparison-block { margin-top: 18px; }
+.comparison-title { padding-block: 10px; border-top: 1px solid var(--line); }
+.comparison-title h3 { font-size: 17px; }
+.comparison-title p { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.comparison-table { overflow-x: auto; }
+.comparison-table table { width: 100%; min-width: 400px; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: 14px; }
+.comparison-table th, .comparison-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.comparison-table th:first-child { width: 22%; }
+.comparison-table th:last-child { width: 14%; }
+.comparison-table thead { background: var(--wash); }
+.difference { display: inline-block; padding: 3px 5px; border-radius: 4px; background: var(--warn-bg); color: var(--warn); font-size: 12px; white-space: nowrap; }
+.difference.same { background: var(--tint); color: var(--accent); }
+.relation-comparison article { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.relation-comparison article header { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.relation-comparison article header span { color: var(--muted); font-size: 13px; }
+.relation-diff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.relation-diff-grid > div { display: grid; align-content: start; gap: 5px; padding: 10px; border-radius: var(--control-radius); background: var(--wash); font-size: 13px; overflow-wrap: anywhere; }
+.relation-diff-grid p { color: var(--muted); }
+.relation-diff-grid span { display: inline-block; margin: 3px 4px 0 0; padding: 3px 5px; border-radius: 4px; background: var(--surface); }
+
+@media (max-width: 1140px) {
+  .workspace, .workspace.filter-collapsed { grid-template-columns: minmax(0, 1fr) 280px; }
+  .workspace.detail-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .filter-panel { grid-column: 1 / -1; }
+  .type-list { grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); }
+  .coverage-strip, .interaction-help { display: none; }
 }
-@media (max-width: 980px) {
-  .comparison-header { grid-template-columns: minmax(0,1fr) 108px minmax(0,1fr); }
-  .workspace { grid-template-columns: 180px minmax(0,1fr); height: auto; overflow: hidden; }
-  .workspace.filter-collapsed { grid-template-columns: minmax(0,1fr); }
-  .workspace.detail-collapsed { grid-template-columns: 180px minmax(0,1fr); }
-  .workspace.filter-collapsed.detail-collapsed { grid-template-columns: minmax(0,1fr); }
-  .network-panel { min-height: 620px; grid-column: 2; grid-row: 1; }
-  .workspace.filter-collapsed .network-panel { grid-column: 1; }
-  .detail-panel { grid-column: 1 / -1; grid-row: 2; height: 420px; border-top: 1px solid var(--line); border-left: 0; }
-  .entity-summary { grid-template-columns: 96px minmax(0,1fr); align-items: center; gap: 12px; padding: 12px 15px; }
-  .entity-summary.without-image { grid-template-columns: 1fr; }
-  .entity-image { width: 96px; height: 72px; }
+@media (max-width: 800px) {
+  .workspace, .workspace.filter-collapsed, .workspace.detail-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .graph-stage { min-height: clamp(320px, 44vh, 420px); }
+  .network-panel:fullscreen .graph-stage { min-height: 0; }
+  .jump-detail { display: flex; min-height: 44px; width: calc(100% - 20px); margin: 10px; overflow-wrap: anywhere; }
+  .detail-scroll { max-height: none; overflow: visible; }
 }
 @media (max-width: 720px) {
-  .page-intro { align-items: flex-start; padding-bottom: 15px; }
-  .page-intro span { display: none; }
-  .mode-switch { margin-top: 4px; }
-  .mode-switch button { min-height: 44px; }
-  .coverage-strip { justify-content: flex-start; margin-top: 0; overflow-x: auto; }
-  .coverage-strip > div { min-width: 105px; }
-  .coverage-strip p { display: none; }
-  .path-search { grid-template-columns: 1fr; gap: 8px; }
-  .path-search .path-explainer { display: block; }
-  .path-explainer strong { display: block; margin-bottom: 3px; }
-  .path-search > svg { display: none; }
-  .path-search > button { min-height: 40px; }
-  .search-bar input, .path-search input, .compare-search input { min-height: 44px; font-size: 16px; }
-  .compare-search { grid-template-columns: 1fr 42px 1fr; }
-  .compare-search > button:last-child { grid-column: 1 / -1; min-height: 42px; }
-  .comparison-header { grid-template-columns: 1fr; }
-  .comparison-score { min-height: 112px; }
-  .product-card.right { text-align: left; }
-  .comparison-title { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .comparison-title p { text-align: left; }
-  .relation-diff-grid { grid-template-columns: 1fr; }
-  .workspace, .workspace.filter-collapsed, .workspace.detail-collapsed, .workspace.filter-collapsed.detail-collapsed { display: block; height: auto; min-height: 0; }
-  .filter-panel { display: block; border-right: 0; border-bottom: 1px solid var(--line); }
-  .type-list { display: flex; overflow-x: auto; overscroll-behavior-x: contain; }
-  .type-list button { min-width: 145px; }
-  .interaction-help { display: none; }
-  .graph-stage { min-height: 560px; }
-  .detail-panel { display: flex; height: 460px; max-height: 460px; }
-  .detail-heading button { width: 44px; height: 44px; }
-  .tool-actions { gap: 4px; }
-  .tool-actions button { width: 44px; height: 44px; }
-  .tool-actions span { display: none; }
-}
-@media (max-width: 520px) {
-  .page-intro { display: block; }
-  .mode-switch { width: max-content; margin-top: 13px; }
-  .mode-switch button { padding-inline: 9px; font-size: 11px; }
-  .search-bar button { min-width: 88px; }
-  .search-bar input { font-size: 16px; }
-  .compare-search { grid-template-columns: 1fr; }
-  .compare-search .swap-products { margin: 0 auto; transform: rotate(90deg); }
-  .compare-search > button:last-child { grid-column: auto; }
+  .mode-switch { width: 100%; }
+  .mode-switch button { min-height: 44px; flex: 1; padding-inline: 5px; font-size: 13px; }
+  .query-dock { padding: 12px; }
+  .sample-row button { min-height: 42px; }
+  .path-search, .compare-search { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
+  .path-search > button[type="submit"], .compare-search > button[type="submit"] { grid-column: 1 / -1; }
+  .tool-actions button, .detail-tabs button, .panel-heading button, .entity-actions .ui-button { min-height: 44px; }
+  .network-toolbar { padding-inline: 10px; }
+  .tool-actions .detail-toggle { display: none; }
+  .relation-diff-grid, .comparison-header { grid-template-columns: minmax(0, 1fr); }
+  .comparison-score { grid-row: 3; justify-items: start; padding: 0; }
   .compare-workspace { padding: 12px; }
-  .comparison-actions { justify-content: stretch; }
-  .comparison-actions button { flex: 1; }
-  .network-toolbar { align-items: flex-start; }
-  .result-summary strong { max-width: 160px; }
-  .tool-actions button:nth-of-type(1), .tool-actions button:nth-of-type(2) { display: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .loader, .mini-loader { animation: none; }
-  .expand-status { transition: none; }
-  .svg-edge line, .svg-node, .svg-node .node-halo { animation: none; }
-  .svg-node { opacity: 1; }
+@media (pointer: coarse) {
+  .cy-canvas { touch-action: pan-y pinch-zoom; }
+  .network-panel:fullscreen .cy-canvas { touch-action: none; }
 }
 </style>
