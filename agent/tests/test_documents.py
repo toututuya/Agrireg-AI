@@ -119,6 +119,8 @@ def test_real_milvus_lite_ingestion_and_chinese_bm25(tmp_path):
     try:
         assert service.ingest(iter(chunks)) == 2
         assert service.ingest(iter(chunks)) == 2
+        client.release_collection("test_documents")
+        service = MilvusDocumentSearch(client, Settings(AGENT_MILVUS_COLLECTION="test_documents"))
         request = DocumentSearchRequest(query="水稻", registration_number="PDA001", mode="bm25")
         hits = service.search(request)
         assert [(hit.document_id, hit.page) for hit in hits] == [("rice", 2)]
