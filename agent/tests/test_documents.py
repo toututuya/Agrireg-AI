@@ -52,7 +52,7 @@ def test_jsonl_rejects_repeated_locator(tmp_path):
         list(read_pages(path))
 
 
-def test_hybrid_filters_both_legs_and_predicts_only_on_candidates(monkeypatch):
+def test_hybrid_predicts_only_on_fused_candidates(monkeypatch):
     import agrireg_agent.documents as documents
 
     ann_request = Mock(side_effect=lambda data, field, params, limit, **kwargs: (field, data, kwargs["expr"]))
@@ -69,15 +69,15 @@ def test_hybrid_filters_both_legs_and_predicts_only_on_candidates(monkeypatch):
     monkeypatch.setattr(documents, "_reranker", lambda *_: model)
     service = MilvusDocumentSearch(client, Settings(AGENT_MILVUS_COLLECTION="registration_docs"))
     service.encode = Mock(return_value=[Mock(tolist=lambda: [0.2])])
-    request = DocumentSearchRequest(query=" 哪一条仍有效？ ", registration_number="ｐｄａ００１", limit=1)
+    request = DocumentSearchRequest(query=" 哪一条仍有效？ ", limit=1)
 
     response = service.search(request)
 
     assert [hit.text for hit in response] == ["当前登记条目"]
     assert response[0].page == 2
     assert client.hybrid_search.call_args.kwargs["reqs"] == [
-        ("dense", [[0.2]], 'registration_number == "PDA001"'),
-        ("sparse", ["哪一条仍有效？"], 'registration_number == "PDA001"'),
+        ("dense", [[0.2]], ""),
+        ("sparse", ["哪一条仍有效？"], ""),
     ]
     model.predict.assert_called_once_with([("哪一条仍有效？", text) for text in texts])
 
@@ -105,13 +105,14 @@ def test_default_api_reports_disabled_and_rejects_bad_input():
         del app.dependency_overrides[get_document_search]
 
 
-def test_real_milvus_lite_ingestion_and_chinese_bm25(tmp_path):
+def test_real_milvus_lite_ingestion_and_exact_filter_in_all_retrieval_legs(tmp_path):
     pymilvus = pytest.importorskip("pymilvus")
     pytest.importorskip("milvus_lite")
     pytest.importorskip("jieba")
     client = pymilvus.MilvusClient(str(tmp_path / "docs.db"))
     service = MilvusDocumentSearch(client, Settings(AGENT_MILVUS_COLLECTION="test_documents"))
-    service.encode = Mock(side_effect=lambda texts: [Mock(tolist=lambda: [1.0] + [0.0] * 1023) for _ in texts])
+    encoder = Mock(side_effect=lambda texts: [Mock(tolist=lambda: [1.0] + [0.0] * 1023) for _ in texts])
+    service.encode = encoder
     chunks = [
         next(chunk_page(source_page(document_id="rice", text="水稻登记条目。水稻样例。"))),
         next(chunk_page(source_page(document_id="apple", text="苹果登记条目。苹果样例。", registration_number="PDA002"))),
@@ -121,9 +122,11 @@ def test_real_milvus_lite_ingestion_and_chinese_bm25(tmp_path):
         assert service.ingest(iter(chunks)) == 2
         client.release_collection("test_documents")
         service = MilvusDocumentSearch(client, Settings(AGENT_MILVUS_COLLECTION="test_documents"))
-        request = DocumentSearchRequest(query="水稻", registration_number="PDA001", mode="bm25")
-        hits = service.search(request)
-        assert [(hit.document_id, hit.page) for hit in hits] == [("rice", 2)]
-        assert service.search(request.model_copy(update={"registration_number": "PDA999"})) == []
+        service.encode = encoder
+        for mode in ("bm25", "dense", "hybrid"):
+            request = DocumentSearchRequest(query="水稻", registration_number="ｐｄａ００１", mode=mode)
+            hits = service.search(request)
+            assert [(hit.document_id, hit.page) for hit in hits] == [("rice", 2)]
+            assert service.search(request.model_copy(update={"registration_number": "PDA999"})) == []
     finally:
         client.close()

@@ -13,7 +13,10 @@ ACTION = re.compile(
 )
 DEPENDENCY = re.compile(r"(?:根据|基于|依据|用|使用|参照|结合)\s*第\s*(\d{1,2})\s*(?:项|个任务|步)")
 PREVIOUS = re.compile(r"(?:根据|基于|依据|用|使用|参照|结合)\s*(?:前一|上一)项")
-REFERENCE = re.compile(r"该产品|这个产品|该成分|该对象|(?<![其另])它(?=的|是|和|[，。！？]|$)")
+REFERENCE = re.compile(
+    r"该产品|这个产品|该成分|该对象|这个编号|该编号|(?:该|这个)登记(?:证)?号|这张(?:登记)?证|"
+    r"(?<![其另])它(?=的|是|和|[，。！？]|$)"
+)
 INTRO = re.compile(
     r"^(?:(?:请|帮我|麻烦)\s*)*(?:完成|处理|执行|分析|做)?\s*(?:以下|下列|下面|这些|这几项)?"
     r"\s*(?:(?:\d+|[一二三四五六七八九十几两]+)[件项])?\s*(?:事|任务|事项|查询)?\s*[:：]?$"
@@ -57,7 +60,8 @@ def split_subtasks(question: str) -> list[Subtask]:
         clauses = [first] if first and not INTRO.fullmatch(first) else []
         for separator, text in zip(pieces[1::2], pieces[2::2], strict=True):
             text = text.strip()
-            if text and (not clauses or ACTION.match(text)):
+            continuation = REFERENCE.search(text) and not (DEPENDENCY.search(text) or PREVIOUS.search(text))
+            if text and (not clauses or (ACTION.match(text) and not continuation)):
                 clauses.append(text)
             elif clauses:
                 clauses[-1] += separator + text

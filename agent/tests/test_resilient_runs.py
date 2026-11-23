@@ -34,6 +34,34 @@ def run_graph(tmp_path, question, handler, **options):
     )
 
 
+def test_definition_uses_sourced_graph_fact_with_documents_enabled(tmp_path):
+    def graph_response(request):
+        assert request.url.path == "/api/graph/search"
+        assert request.url.params["keyword"] == "叶锈病"
+        return httpx.Response(200, json={"nodes": [{
+            "id": 1, "name": "leaf rust", "label": "Disease", "center": True,
+            "properties": {
+                "name": "leaf rust", "definition_zh": "有来源的释义。",
+                "definition_source_title": "病害资料", "definition_source_url": "https://example.org/definition",
+            },
+        }], "edges": []})
+
+    result = run_graph(tmp_path, "叶锈病是啥", graph_response, documents_enabled=True)
+    assert [item["step"]["tool"] for item in result["tool_results"]] == ["search_entity"]
+    assert result["report"] == "有来源的释义。 [1]"
+    assert result["verified_evidence"][0]["url"] == "https://example.org/definition"
+
+
+def test_definition_without_graph_evidence_does_not_use_unrelated_documents(tmp_path):
+    def graph_response(request):
+        assert request.url.path == "/api/graph/search"
+        return httpx.Response(200, json={"nodes": [], "edges": []})
+
+    result = run_graph(tmp_path, "什么是这个病名？", graph_response, documents_enabled=True)
+    assert [item["step"]["tool"] for item in result["tool_results"]] == ["search_entity"]
+    assert result["report"] == "图谱暂未找到「这个病名」的可引用释义。"
+
+
 def test_twelve_step_run_retries_only_the_timed_out_step(tmp_path, monkeypatch):
     calls = Counter()
     waits = []
@@ -148,6 +176,12 @@ def test_split_requires_explicit_task_boundaries_and_prior_dependencies():
     assert [task["status"] for task in tasks] == ["blocked", "pending", "pending"]
     queries = split_subtasks("请帮我做两件事，查 PD20990101；再查 PD20990102")
     assert [task["question"] for task in queries] == ["查 PD20990101", "再查 PD20990102"]
+
+
+def test_same_registration_reference_stays_in_the_original_task():
+    assert split_subtasks("我只想在登记资料里核对一下 00A657-62。请定位这个编号对应的文档。") == []
+    tasks = split_subtasks("1. 查 00A657-62。\n2. 根据第1项查这个编号的登记资料。")
+    assert len(tasks) == 2 and tasks[1]["depends_on"] == [1]
 
 
 def test_dependent_task_uses_verified_registration_from_the_prior_result(tmp_path):

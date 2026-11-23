@@ -120,6 +120,41 @@ QUESTIONS = {
     ),
 }
 
+MIGRATION_QUESTIONS = {
+    "document": (
+        "用证号 {reg} 找到对应的登记资料。",
+        "请按登记证号 {reg} 精确筛选登记材料。",
+        "只保留登记号为 {reg} 的登记文档。",
+        "登记文档按证号筛选，目标是 {reg}。",
+        "能从登记材料里定位证号 {reg} 吗？",
+        "我核对的是 {reg} 这张证，请返回它的登记资料。",
+    ),
+    "missing_registration": (
+        "请按登记证号精确查找“{product_description}”的登记材料，目标证号还没填。",
+        "精确定位“{product_description}”的登记材料。{other} 是格式示例，目标证号还没给。",
+        "帮我按登记证号筛“{product_description}”的登记文档，证号稍后补。",
+        "我要按实际登记证号查“{product_description}”的登记资料。{other} 仅供参考，目标证号尚未提供。",
+        "等我补上实际证号，再精确检索“{product_description}”的登记材料。{other} 是示例。",
+        "想精确定位“{product_description}”的一张登记证，登记证号还没提供。",
+    ),
+    "path": (
+        "在图谱里找从登记证 {reg} 到“{target}”的关系路径。",
+        "查询“{reg}”连到“{target}”的图谱关系链。",
+        "以 {reg} 为起点，“{target}”为终点，帮我查路径。",
+        "用证号 {reg} 和图谱实体“{target}”作为两端，检索最短路径。",
+        "给我图谱里证号 {reg} 通往“{target}”的链路。",
+        "在图谱中，从“{reg}”沿什么关系可以到“{target}”？",
+    ),
+    "missing_path": (
+        "查从登记证 {reg} 出发的图谱关系路径，我还没指定终点。",
+        "从“{reg}”沿图谱查路径，终点实体名称我稍后发。",
+        "已知图谱关系链起点是 {reg}，终点实体待补。",
+        "从登记 {reg} 查一条图谱路径，另一端的名字我接下来再给。",
+        "准备从 {reg} 走图谱查路径，终点实体的全称还没填。",
+        "请查登记“{reg}”的关联链，具体要连向哪个实体我稍后告诉你。",
+    ),
+}
+
 
 def load_registry(workbook: Path) -> dict:
     import xlrd
@@ -164,16 +199,31 @@ def label(task_type: str, summary: str, entities: list[str], *steps: dict, missi
 
 def group_examples(reg: str, other: str, record: dict, ordinal: int, phrase: int) -> tuple[list[dict], list[dict]]:
     holder, product = record["holder"], record["product"]
-    compound, cid = PUBCHEM.get(product, ("", 0))
-    values = {"reg": reg, "other": other, "holder": holder, "product": product, "compound": compound}
-    group = f"moa-2026-11-{reg}"
+    migration = "path_targets" in record
+    compound, cid = record.get("pubchem_reference", ("", 0)) if migration else PUBCHEM.get(product, ("", 0))
+    targets = record.get("path_targets") or [holder]
+    target = targets[ordinal % len(targets)]
+    values = {
+        "reg": reg, "other": other, "holder": holder, "product": product, "compound": compound, "target": target,
+        "product_description": f"{holder} 的 {product}" if holder else product,
+    }
+    if migration:
+        group, provenance, source_ref = f"migration-{reg}", "neo4j_registry_derived", record["source_ref"]
+    else:
+        group, provenance = f"moa-2026-11-{reg}", "public_registry_generated"
+        source_ref = f"{WORKBOOK_URL}#xls-row={record['xls_rows'][0]}"
     rows, replays = [], []
 
     def add(kind: str, plan: dict, evidence: list[str], *, terms=(), enabled=True, followup=None) -> None:
-        question = QUESTIONS[kind][phrase].format(**values)
+        templates = MIGRATION_QUESTIONS.get(kind, QUESTIONS[kind]) if migration else QUESTIONS[kind]
+        template = templates[phrase]
+        if migration:
+            for original in ("原始登记材料", "原始登记文件", "登记原文", "登记附件", "登记文件", "附件", "原文"):
+                template = template.replace(original, "登记资料")
+        question = template.format(**values)
         example = {
             "id": f"{group}-{kind}", "group_id": group, "kind": kind, "question": question,
-            "source": "public_registry_generated", "source_ref": f"{WORKBOOK_URL}#xls-row={record['xls_rows'][0]}",
+            "source": provenance, "source_ref": source_ref,
             "documents_enabled": enabled, "plan": plan, "clarification_terms": list(terms),
         }
         rows.append(example)
@@ -185,9 +235,9 @@ def group_examples(reg: str, other: str, record: dict, ordinal: int, phrase: int
         else:
             replays.append({"id": example["id"], "evidence": evidence})
 
-    docs = step("search_documents", "按登记号检索原文", query=reg, registration_number=reg)
+    docs = step("search_documents", "按登记号检索登记资料" if migration else "按登记号检索原文", query=reg, registration_number=reg)
     graph = step("search_entity", "查找图谱登记实体", keyword=reg)
-    document_plan = label("fact_check", "定位登记附件", [reg], docs)
+    document_plan = label("fact_check", "定位登记资料" if migration else "定位登记附件", [reg], docs)
     add("document", document_plan, [reg])
     add("missing_registration", label("fact_check", "确认要查的登记证号", [], missing="请补充目标登记证号。"),
         [reg], terms=("登记", "号"), followup=(f"目标登记证号是 {reg}。", document_plan))
@@ -199,11 +249,12 @@ def group_examples(reg: str, other: str, record: dict, ordinal: int, phrase: int
         add("missing_comparison", label("comparison", "确认另一张登记证", [reg], missing="请补充另一张用于比较的登记证号。"),
             [reg, other], terms=("号",), followup=(f"另一张登记证号是 {other}。", plan))
     else:
-        path = step("find_relation_path", "查找登记证到持有人的路径", source=reg, target=holder)
-        plan = label("relation_path", "查找登记证与持有人的图谱路径", [reg, holder], path)
+        target_type = "关联实体" if migration else "持有人"
+        path = step("find_relation_path", f"查找登记证到{target_type}的路径", source=reg, target=target)
+        plan = label("relation_path", f"查找登记证与{target_type}的图谱路径", [reg, target], path)
         add("path", plan, [reg])
-        add("missing_path", label("relation_path", "确认路径终点", [reg], missing="请补充终点持有人名称。"),
-            [reg], terms=("持有人",), followup=(f"终点持有人是“{holder}”。", plan))
+        add("missing_path", label("relation_path", "确认路径终点", [reg], missing=f"请补充终点{target_type}名称。"),
+            [reg], terms=("终点" if migration else "持有人",), followup=(f"终点{target_type}是“{target}”。", plan))
 
     kind = ordinal % 5
     if kind == 0:
@@ -234,16 +285,23 @@ def build(workbook: Path, output: Path) -> None:
     external = iter(external_registrations)
     reserved = set(external_registrations)
     remaining = iter(reg for reg in registrations if reg not in reserved)
+    pairs = {
+        split: [(next(external if ordinal % 5 == 0 else remaining), next(remaining)) for ordinal in range(count)]
+        for split, count in GROUPS.items()
+    }
+    write_dataset(source, output, pairs, {"seed": SEED, "split_policy": "two_unique_registration_ids_per_group"})
+
+
+def write_dataset(source: dict, output: Path, splits: dict[str, list[tuple[str, str]]], metadata: dict) -> None:
+    records = source["records"]
     output.mkdir(parents=True, exist_ok=True)
     (output / "registry_snapshot.json").write_text(json.dumps(source, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    manifest = {"seed": SEED, "split_policy": "two_unique_registration_ids_per_group", "splits": {}}
+    manifest = metadata | {"splits": {}}
     all_replay = []
     used = set()
-    for split_number, (split, count) in enumerate(GROUPS.items()):
+    for split_number, (split, pairs) in enumerate(splits.items()):
         rows, split_registrations = [], set()
-        for ordinal in range(count):
-            reg = next(external if ordinal % 5 == 0 else remaining)
-            other = next(remaining)
+        for ordinal, (reg, other) in enumerate(pairs):
             split_registrations.update((reg, other))
             phrase = 2 * split_number + (ordinal // 10) % 2
             examples, replays = group_examples(reg, other, records[reg], ordinal, phrase)
@@ -256,7 +314,7 @@ def build(workbook: Path, output: Path) -> None:
             rows.extend(examples)
             if split == "test":
                 all_replay.extend(replays)
-        if split_registrations & used or len(split_registrations) != 2 * count:
+        if split_registrations & used or len(split_registrations) != 2 * len(pairs):
             raise ValueError(f"Registration coverage overlaps or is incomplete in {split}.")
         used.update(split_registrations)
         if len({row["question"] for row in rows}) != len(rows):
@@ -264,7 +322,9 @@ def build(workbook: Path, output: Path) -> None:
         _write_jsonl(output / f"{split}.jsonl", rows)
         parsed = read_dataset(output / f"{split}.jsonl")
         manifest["splits"][split] = {
-            "groups": count, "rows": len(parsed), "registrations": len(split_registrations),
+            "groups": len(pairs), "rows": len(parsed), "registrations": len(split_registrations),
+            **({"primary_source_groups": dict(Counter(records[reg]["source_group"] for reg, _ in pairs))}
+               if "dump_sha256" in source else {}),
             "sha256": dataset_fingerprint(parsed), "kinds": dict(Counter(row["kind"] for row in parsed)),
         }
     for left, right in (("train", "dev"), ("train", "test"), ("dev", "test")):

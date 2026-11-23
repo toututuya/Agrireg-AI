@@ -20,6 +20,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Entity-centric GraphRAG for pesticide questions.
@@ -37,9 +39,16 @@ public class DeepSeekGraphAssistantService {
     private static final int MAX_DIRECT_EVIDENCE = 6;
     private static final int MAX_REGISTER_EXPANSIONS = 4;
     private static final int MAX_EVIDENCE_PER_EXPANSION = 12;
+    private static final String DEFINITION_PROPERTY = "definition_zh";
+    private static final String DEFINITION_LABEL = "释义";
     private static final List<String> ATTRIBUTE_PROPERTIES = Arrays.asList(
-            "CAS registry number", "Molecular or Experimental Formulas Formul", "MF/MW",
+            DEFINITION_PROPERTY, "CAS registry number", "Molecular or Experimental Formulas Formul", "MF/MW",
             "Resistance", "Mode of action", "Chemical classes(Groups) or source"
+    );
+    private static final Pattern ENTITY_HINT = Pattern.compile(
+            "[“‘\"']([^”’\"']{1,80})[”’\"']|"
+                    + "(?<![A-Z0-9-])((?:PD|WP|LS|WL|EX)\\d{5,12}|\\d{2}[A-Z0-9]\\d{3}-\\d{2}|\\d{4}-\\d{3})(?![A-Z0-9-])",
+            Pattern.CASE_INSENSITIVE
     );
 
     @Autowired
@@ -60,7 +69,7 @@ public class DeepSeekGraphAssistantService {
     @Value("${deepseek.model:deepseek-v4-flash}")
     private String model;
 
-    public boolean isConfigured() {
+    private boolean isConfigured() {
         return enabled && notBlank(apiKey);
     }
 
@@ -69,9 +78,10 @@ public class DeepSeekGraphAssistantService {
     }
 
     public Map<String, Object> ask(String question, List<Map<String, String>> conversationContext) throws Exception {
-        if (!isConfigured()) throw new IllegalStateException("assistant is not configured");
-
-        List<String> searchTerms = planSearchTerms(question, conversationContext);
+        boolean useModel = isConfigured();
+        List<String> searchTerms = useModel
+                ? planSearchTerms(question, conversationContext)
+                : localSearchTerms(question);
         List<Map<String, Object>> evidence = retrieveEvidence(searchTerms);
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -79,7 +89,7 @@ public class DeepSeekGraphAssistantService {
         result.put("focusEntities", searchTerms);
         result.put("evidence", evidence);
         result.put("grounded", !evidence.isEmpty());
-        result.put("model", model);
+        result.put("model", useModel ? model : "graph-evidence");
 
         if (evidence.isEmpty()) {
             result.put("answer", "当前图谱没有检索到足够的关联信息。可以换用具体的农药名称、作物名称、病虫害名称或有效成分再提问。");
@@ -87,9 +97,50 @@ public class DeepSeekGraphAssistantService {
             return result;
         }
 
-        result.put("answer", answerFromEvidence(question, evidence, conversationContext));
+        String answer = useModel
+                ? answerFromEvidence(question, evidence, conversationContext)
+                : renderGraphAnswer(question, evidence);
+        result.put("answer", answer);
         result.put("followUps", buildFollowUps(evidence));
         return result;
+    }
+
+    private List<String> localSearchTerms(String question) {
+        Set<String> terms = new LinkedHashSet<>();
+        Matcher hints = ENTITY_HINT.matcher(question);
+        while (terms.size() < MAX_SEARCH_TERMS && hints.find()) {
+            String hint = (hints.group(1) != null ? hints.group(1) : hints.group(2)).trim();
+            if (!hint.isEmpty()) terms.add(hint);
+        }
+        if (terms.isEmpty()) {
+            String subject = question.trim()
+                    .replaceFirst("^(?:请问|请解释|请介绍|帮我查|请查|查询)\\s*", "")
+                    .replaceFirst("^(?:什么是|何谓)\\s*", "")
+                    .split("(?:是什么|是啥|是什么意思|有哪些|有什么|有何|怎么|涉及哪些|关联哪些|的(?:登记|关联|病原|症状|作用))", 2)[0]
+                    .replaceFirst("[。！？?\\s]+$", "").trim();
+            if (!subject.isEmpty() && subject.length() <= 80) terms.add(subject);
+        }
+        return new ArrayList<>(terms);
+    }
+
+    private String renderGraphAnswer(String question, List<Map<String, Object>> evidence) {
+        if (question.matches(".*(?:什么是|何谓|是什么|是啥|是什么意思).*")) {
+            for (Map<String, Object> fact : evidence) {
+                if (DEFINITION_LABEL.equals(fact.get("property"))) {
+                    return fact.get("value") + " [" + fact.get("index") + "]";
+                }
+            }
+            return "图谱找到了相关记录，现有证据缺少可引用的释义。可以展开证据查看关联信息。";
+        }
+        List<String> lines = new ArrayList<>();
+        for (Map<String, Object> fact : evidence) {
+            String details = "attribute".equals(fact.get("factType"))
+                    ? String.valueOf(fact.get("targetName"))
+                    : "「" + fact.get("sourceName") + "」→「" + fact.get("targetName") + "」（" + fact.get("relation") + "）";
+            lines.add(details + " [" + fact.get("index") + "]");
+            if (lines.size() == 3) break;
+        }
+        return String.join("\n", lines);
     }
 
     private List<String> planSearchTerms(String question, List<Map<String, String>> conversationContext) throws Exception {
@@ -190,6 +241,7 @@ public class DeepSeekGraphAssistantService {
                 if (!seen.add(key)) continue;
 
                 Map<String, Object> fact = new LinkedHashMap<>();
+                String propertyLabel = DEFINITION_PROPERTY.equals(property) ? DEFINITION_LABEL : property;
                 fact.put("index", evidence.size() + 1);
                 fact.put("factType", "attribute");
                 fact.put("sourceId", node.get("id"));
@@ -197,10 +249,14 @@ public class DeepSeekGraphAssistantService {
                 fact.put("sourceLabel", node.get("label"));
                 fact.put("relation", "HAS_PROPERTY");
                 fact.put("targetId", null);
-                fact.put("targetName", property + "：" + rawValue);
+                fact.put("targetName", propertyLabel + "：" + rawValue);
                 fact.put("targetLabel", "Property");
-                fact.put("property", property);
+                fact.put("property", propertyLabel);
                 fact.put("value", String.valueOf(rawValue));
+                if (DEFINITION_PROPERTY.equals(property)) {
+                    fact.put("sourceUrl", properties.get("definition_source_url"));
+                    fact.put("sourceTitle", properties.get("definition_source_title"));
+                }
                 evidence.add(fact);
                 if (evidence.size() >= MAX_EVIDENCE) return;
             }
@@ -295,6 +351,7 @@ public class DeepSeekGraphAssistantService {
     private List<String> buildFollowUps(List<Map<String, Object>> evidence) {
         Set<String> names = new LinkedHashSet<>();
         for (Map<String, Object> fact : evidence) {
+            if ("attribute".equals(fact.get("factType"))) continue;
             String target = String.valueOf(fact.get("targetName"));
             if (notBlank(target) && !"null".equals(target)) names.add(target);
             if (names.size() >= 2) break;

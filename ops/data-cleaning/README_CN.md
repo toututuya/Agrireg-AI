@@ -13,6 +13,8 @@
 
 原始导入值由数据库 dump 保留；实体名称另保留在 `raw_name`，合并实体保留 `aliases` 与 `merged_legacy_ids`。
 
+恢复清洗后的图谱时执行 [03_add_search_aliases.cypher](03_add_search_aliases.cypher)，为既有苹果、苹果树和叶锈病节点补充中文检索词。叶锈病节点附有可核对的释义与来源，使用小麦叶锈病作为示例。脚本支持重复执行。
+
 ## 执行
 
 ```powershell

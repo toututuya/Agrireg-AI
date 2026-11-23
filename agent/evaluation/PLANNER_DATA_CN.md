@@ -1,6 +1,6 @@
 # Qwen3 规划数据与微调流程
 
-AgriReg AI 的 SFT 样本由真实或合成问题和审核过的计划 JSON 组成。每道题标注任务类型、实体、工具和参数。需要追问时写明缺失字段并将 `steps` 设为空。涉及合规筛查的计划保留人工审批标记。Neo4j 和 Milvus 用于验证计划执行和取证，标注、校验及规划器 SFT 可独立完成。
+AgriReg AI 用可核验的真实登记记录构建 SFT 样本。每道题标注任务类型、实体、工具和参数。需要追问时写明缺失字段并将 `steps` 设为空。涉及合规筛查的计划保留人工审批标记。全库构造流程见 [迁移数据指南](MIGRATION_DATA_CN.md)。
 
 ## 准备训练集和留出集
 
@@ -8,19 +8,18 @@ AgriReg AI 的 SFT 样本由真实或合成问题和审核过的计划 JSON 组�
 
 每个种子先标预期动作和关键入参。参数齐全的题在固定图谱或文档快照上回放，并核对记录 ID。缺参题标明应追问的字段，在补入固定回复后复测工具和证据。需要核对语义的样例由人工复核。APIGen 的分层校验提供了格式、执行与语义三层参考。BFCL 的 Missing Parameters 场景用对话检验模型能否识别无法从上下文补齐的字段。[APIGen 论文](https://arxiv.org/abs/2406.18518) · [BFCL 数据说明](https://github.com/ShishirPatil/gorilla/blob/main/berkeley-function-call-leaderboard/bfcl_eval/data/README.md#bfcl-v3)
 
-JSONL 每行必填 `id`、`question` 和 `plan`。`kind` 可用于按场景汇总分数。`group_id` 用于标记同源的题，`source_ref` 可写登记记录编号或授权来源的稳定引用。`documents_enabled` 默认为 `true`。追问题可用 `clarification_terms` 指定评测必须问到的字段词。可参考 [训练样例](planner_samples/train.jsonl) 和 [留出样例](planner_samples/test.jsonl)。
+JSONL 每行必填 `id`、`question` 和 `plan`。`kind` 可用于按场景汇总分数。`group_id` 用于标记同源的题，`source_ref` 可写登记记录编号或授权来源的稳定引用。`documents_enabled` 默认为 `true`。追问题可用 `clarification_terms` 指定评测必须问到的字段词。公开样本见 [一期公告训练集](registry_planner_v1/train.jsonl)。
 
 在 Agent 目录执行 `check-data`。它指出不合规的行，并在训练、验证和留出集之间检查重复 ID、规范化问题和已标注的组 ID。加 `--base` 时只在 CPU 加载 Qwen3 分词器来检查样本长度。
 
 ~~~bash
 python -m pip install -e ".[tokenizer]"
-agrireg-planner-sft check-data --train evaluation/planner_samples/train.jsonl --test evaluation/planner_samples/test.jsonl
 agrireg-planner-sft check-data --train labels/train.jsonl --dev labels/dev.jsonl --test labels/test.jsonl --base /path/to/Qwen3-1.7B
 ~~~
 
 ## 训练和评测
 
-用同一基座、量化设置和提示词分别评测原始模型和训练后的 adapter。沿用单卡微批 1、梯度累积 4 的设置，700 条训练题大致用 175 个优化步覆盖一轮。先在验证集挑训练步数，再在冻结的留出集报告结果。训练、评测和校验输出记录数据指纹。合成数据流程可通过省略 `--dataset` 复现。
+用同一基座、量化设置和提示词分别评测原始模型和训练后的 adapter。沿用单卡微批 1、梯度累积 4 的设置，700 条训练题用 175 个优化步覆盖一轮。先在验证集挑训练步数，再在冻结的留出集报告结果。训练、评测和校验输出记录数据指纹。
 
 ~~~bash
 python -m pip install -e ".[training,training-4bit]"

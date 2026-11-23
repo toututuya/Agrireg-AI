@@ -111,7 +111,7 @@ class ControlledTools:
         ]
         return {
             "tool": "search_documents",
-            "summary": f"找到 {len(hits)} 段登记文档原文。",
+            "summary": f"找到 {len(hits)} 段登记资料。",
             "evidence": evidence,
         }
 
@@ -221,13 +221,25 @@ class ControlledTools:
         for node in nodes[:16]:
             metadata = node.get("evidence") or {}
             properties = node.get("properties") or {}
+            definition = properties.get("definition_zh")
+            if node.get("center") and isinstance(definition, str) and definition.strip():
+                evidence.append({
+                    "id": f"graph-definition:{node.get('id')}",
+                    "source": properties.get("definition_source_title") or "GDP-KG",
+                    "title": node.get("name") or "实体释义",
+                    "kind": "entity_definition",
+                    "summary": definition,
+                    "url": properties.get("definition_source_url") or "",
+                })
             evidence.append(
                 {
                     "id": f"graph-node:{node.get('id')}",
                     "source": metadata.get("dataset") or "GDP-KG",
                     "title": node.get("name") or "图谱实体",
                     "kind": node.get("label") or "Entity",
-                    "summary": self._properties_summary(properties),
+                    "summary": self._properties_summary({
+                        key: value for key, value in properties.items() if not key.startswith("definition_")
+                    }),
                     "url": metadata.get("sourceUrl") or "",
                     "jurisdiction": metadata.get("jurisdiction") or "",
                     "properties": properties,

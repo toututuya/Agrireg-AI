@@ -12,7 +12,7 @@ Copy-Item .env.example .env.local
 .\start-local.ps1
 ```
 
-DeepSeek 默认关闭。需要问答时在 `.env.local` 设置 `DEEPSEEK_ENABLED=true` 和 `DEEPSEEK_API_KEY`。默认使用成本较低的 `deepseek-v4-flash`，请求显式关闭思考模式。
+DeepSeek 默认关闭，问答接口会直接返回 Neo4j 中可引用的释义和关系。需要模型综合回答时，在 `.env.local` 设置 `DEEPSEEK_ENABLED=true` 和 `DEEPSEEK_API_KEY`。配置后的默认模型为 `deepseek-v4-flash`，关闭思考模式。
 
 对话历史默认保存在 H2 文件数据库 `data/agrireg-chat*`。API 每次只取最近两轮消息作为指代解析上下文，完整问题、回答、识别实体和图谱证据仍可从历史接口恢复。`data/` 已被 Git 忽略。
 
