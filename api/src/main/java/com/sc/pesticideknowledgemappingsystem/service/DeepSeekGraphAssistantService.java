@@ -19,6 +19,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -232,7 +233,11 @@ public class DeepSeekGraphAssistantService {
             return "图谱找到了相关记录，现有证据缺少可引用的释义。可以展开证据查看关联信息。";
         }
         List<String> lines = new ArrayList<>();
-        for (Map<String, Object> fact : evidence) {
+        List<Map<String, Object>> ranked = new ArrayList<>(evidence);
+        if (question.matches("(?s).*(关联|关系|登记作物|防治对象|侵染|有效成分).*")) {
+            ranked.sort(Comparator.comparingInt(fact -> relationshipRelevance(question, fact)));
+        }
+        for (Map<String, Object> fact : ranked) {
             String details = "attribute".equals(fact.get("factType"))
                     ? String.valueOf(fact.get("targetName"))
                     : relationshipDescription(fact);
@@ -240,6 +245,16 @@ public class DeepSeekGraphAssistantService {
             if (lines.size() == 3) break;
         }
         return String.join("\n", lines);
+    }
+
+    private int relationshipRelevance(String question, Map<String, Object> fact) {
+        if ("attribute".equals(fact.get("factType"))) return 2;
+        String relation = String.valueOf(fact.get("relation"));
+        if (("APPLIED_TO".equals(relation) && question.contains("作物"))
+                || ("TREATS".equals(relation) && question.contains("防治对象"))
+                || ("INFECTS".equals(relation) && question.contains("侵染"))
+                || ("INCLUDES".equals(relation) && question.contains("有效成分"))) return 0;
+        return 1;
     }
 
     private String relationshipDescription(Map<String, Object> fact) {
