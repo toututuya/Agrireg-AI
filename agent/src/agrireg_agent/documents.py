@@ -145,7 +145,7 @@ class MilvusDocumentSearch:
         schema.add_field("page", DataType.INT32)
         schema.add_field(
             "text", DataType.VARCHAR, max_length=CHUNK_LENGTH * 4,
-            enable_analyzer=True, analyzer_params={"type": "chinese"},
+            enable_analyzer=True, analyzer_params={"tokenizer": "jieba", "filter": ["lowercase"]},
         )
         schema.add_field("dense", DataType.FLOAT_VECTOR, dim=DENSE_DIM)
         schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
