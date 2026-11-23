@@ -1,22 +1,24 @@
 import json
+from pathlib import Path
 
 from agrireg_agent import planner_sft
 from agrireg_agent.models import TaskPlan
 from agrireg_agent.planner import parse_plan
-from agrireg_agent.planner_data import make_dataset
+from agrireg_agent.planner_data import ensure_disjoint, read_dataset
 from agrireg_agent.planner_sft import LocalQwenPlanner, _score_plans, training_sequence
 
 
-def test_sft_data_has_entity_holdout_and_valid_targets():
-    train, heldout = make_dataset("train"), make_dataset("test")
-    assert len(train) == 336
-    assert len(heldout) == 42
-    assert set(row["question"] for row in train).isdisjoint(row["question"] for row in heldout)
-    assert {entity for row in train for entity in row["plan"]["entities"]}.isdisjoint(
-        entity for row in heldout for entity in row["plan"]["entities"]
-    )
+PUBLIC_REGISTRY = Path(__file__).resolve().parents[1] / "evaluation" / "registry_planner_v1"
+
+
+def test_sft_data_has_disjoint_groups_and_valid_targets():
+    train = read_dataset(PUBLIC_REGISTRY / "train.jsonl")
+    heldout = read_dataset(PUBLIC_REGISTRY / "test.jsonl")
+    assert len(train) == 700
+    assert len(heldout) == 200
+    ensure_disjoint(train, heldout)
     for row in train + heldout:
-        plan = parse_plan(row["plan"], row["question"], documents_enabled=True)
+        plan = parse_plan(row["plan"], row["question"], documents_enabled=row["documents_enabled"])
         assert isinstance(plan, TaskPlan)
         if row["kind"].startswith("missing_"):
             assert plan.missing_information and not plan.steps
@@ -35,7 +37,7 @@ def test_sft_loss_masks_prompt_and_keeps_assistant_eos():
             assert answer.endswith(self.eos_token) and not options["add_special_tokens"]
             return [3, 4, 5]
 
-    result = training_sequence(StubTokenizer(), make_dataset("train")[0])
+    result = training_sequence(StubTokenizer(), read_dataset(PUBLIC_REGISTRY / "train.jsonl")[0])
     assert result == {"input_ids": [1, 2, 3, 4, 5], "labels": [-100, -100, 3, 4, 5]}
 
 
@@ -45,7 +47,7 @@ def test_qwen_without_adapter_defers_to_fallback():
 
 
 def test_heldout_metrics_use_latency_sample_count(monkeypatch):
-    rows = make_dataset("test")
+    rows = read_dataset(PUBLIC_REGISTRY / "test.jsonl")
     answers = {row["input"]: json.dumps(row["plan"], ensure_ascii=False) for row in rows}
     monkeypatch.setattr(planner_sft, "_generate", lambda tokenizer, model, system, user: answers[user])
     monkeypatch.setattr(
@@ -54,13 +56,13 @@ def test_heldout_metrics_use_latency_sample_count(monkeypatch):
 
     result = planner_sft._measure(None, None, rows)
 
-    assert result["exact_actions"] == result["cases"] == 42
-    assert result["latency_cases"] == 7
+    assert result["exact_actions"] == result["cases"] == len(rows)
+    assert result["latency_cases"] == len({row["kind"] for row in rows})
     assert 0 <= result["p50_ms"] <= result["p95_ms"]
 
 
 def test_decision_checks_score_raw_calls_and_document_parameters_separately():
-    source = make_dataset("test")
+    source = read_dataset(PUBLIC_REGISTRY / "test.jsonl")
     document = next(row for row in source if row["kind"] == "document")
     ready = next(row for row in source if row["kind"] == "graph")
     missing, correct_ask = [row for row in source if row["kind"] == "missing_comparison"][:2]

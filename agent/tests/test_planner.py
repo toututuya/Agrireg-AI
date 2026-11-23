@@ -1,4 +1,5 @@
-from agrireg_agent.planner import fallback_plan, parse_plan
+from agrireg_agent.planner import fallback_plan, parse_plan, plan_explicit_missing_registration
+from agrireg_agent.task_queue import CLARIFICATION_SEPARATOR
 
 
 def test_comparison_plan_uses_bounded_tools():
@@ -37,4 +38,16 @@ def test_registration_uses_filtered_document_lookup():
     assert plan.steps[0].tool == "search_documents"
     assert plan.steps[0].arguments["registration_number"] == "PD20230017"
     assert all(step.tool != "external_substance_lookup" for step in plan.steps)
+
+
+def test_missing_registration_accepts_real_migration_number_and_ignores_examples():
+    question = "请按登记证号精确查找 Dagda 的登记资料，目标证号还没填。"
+    initial = plan_explicit_missing_registration(question, False)
+    assert initial and initial.missing_information and not initial.steps
+    for reply in ("00a657-62", "目标登记证号是 00A657-62。"):
+        resumed = plan_explicit_missing_registration(f"{question}{CLARIFICATION_SEPARATOR}{reply}", False)
+        assert resumed and not resumed.missing_information
+        assert resumed.steps[0].arguments["registration_number"] == "00A657-62"
+    example = plan_explicit_missing_registration(f"{question}{CLARIFICATION_SEPARATOR}证号 4387-901 是示例。", False)
+    assert example and example.missing_information and not example.steps
 

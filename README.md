@@ -82,6 +82,9 @@ AgriReg AI 将农药登记、作物、病虫害、有效成分、化学类别、
 | 产品对比 | 对比两个登记产品的成分、作物、病虫害与共有关系 |
 | 实体详情 | 图片、属性、直接关联和登记证据在独立侧栏内滚动 |
 | GraphRAG | 固定检索模板获取属性与关系证据，模型依据编号证据生成回答 |
+| 登记资料 RAG | BGE-M3、BM25、RRF 和 Cross-Encoder 检索可追溯的登记快照 |
+| Qwen3 规划器 | 基于实际登记号和图谱证据构造工具调用及缺参追问的 LoRA 训练数据 |
+| MCP | FastMCP 提供实体检索、关系路径和登记资料检索 |
 | 会话恢复 | H2 持久化最近对话、消息、识别实体和回答证据 |
 | 证据联动 | 点击历史回答中的 `[n]`，返回图谱并高亮对应节点与关系 |
 | Stateful Agent | LangGraph 状态图编排任务规划、受控工具路由、证据合并、冲突检查与报告生成 |
@@ -149,7 +152,7 @@ stateDiagram-v2
     Report --> [*]
 ```
 
-当前工具集只有五类：`search_entity`、`compare_entities`、`find_relation_path`、`grounded_answer` 和 `external_substance_lookup`。Agent 不能访问文件系统、Shell、数据库账号或任意网络地址；图谱工具统一调用 Spring Boot 的有界接口，外部核验当前只接 PubChem PUG REST。
+规划器使用五类工具，分别是 `search_entity`、`compare_entities`、`find_relation_path`、`external_substance_lookup` 和 `search_documents`。图谱工具统一调用 Spring Boot 的有界接口，外部核验接 PubChem PUG REST，登记资料检索使用 Milvus。全库导出、索引构建和微调见 [迁移数据指南](agent/evaluation/MIGRATION_DATA_CN.md)。
 
 运行采用 Thread / Run / Event 模型。LangGraph SQLite Checkpointer 保存节点状态，应用数据库保存用户可见事件；进程重启后运行会进入 `paused`，可从最近检查点继续。生产部署时可将两类 SQLite 存储替换为 PostgreSQL，并由同一 API Gateway 统一鉴权、限流和审计。
 

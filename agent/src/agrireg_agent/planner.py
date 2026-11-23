@@ -29,11 +29,15 @@ TOOL_ARGUMENTS = {
     "search_documents": ({"query"}, {"registration_number"}),
 }
 REGISTRATION = re.compile(r"(?<![A-Z0-9])(?:PD|WP|LS|WL|EX)\d{5,12}(?![A-Z0-9])", re.I)
-DOCUMENT_TERMS = re.compile(r"登记(证|号|文档|内容|材料|有效|状态)|说明书|标签|文件|附件")
+DOCUMENT_TERMS = re.compile(r"登记(证|号|文档|内容|材料|资料|有效|状态)|说明书|标签|文件|附件")
 COMPLIANCE_TERMS = re.compile(r"合规|风险|禁用|批准|能否使用|是否允许")
 FOLLOWUP = re.compile(r"^(?:那[么，, ]*)?(?:它|该产品|这个产品|该成分|该对象|上一个)")
 REGISTRATION_FIELD = r"(?:登记(?:证)?(?:编)?号|证号)"
-DOCUMENT_CONTENT = re.compile(r"原文|文件|文档|附件|材料|标签|说明书")
+MIGRATION_REGISTRATION = r"(?:\d{2}[A-Z0-9]\d{3}-\d{2}|\d{4}(?:-\d{1,3})?)"
+NAMED_MIGRATION_REGISTRATION = re.compile(
+    rf"{REGISTRATION_FIELD}\s*(?:为|是|[：:])?\s*[“\"']?({MIGRATION_REGISTRATION})(?![A-Z0-9-])", re.I,
+)
+DOCUMENT_CONTENT = re.compile(r"原文|文件|文档|附件|材料|资料|标签|说明书")
 EXACT_REGISTRATION_REQUEST = re.compile(
     rf"精[确准]|按(?:实际|目标|具体)?{REGISTRATION_FIELD}|(?:实际|目标|具体)(?:的)?{REGISTRATION_FIELD}|一张(?:登记)?证"
 )
@@ -130,12 +134,16 @@ def plan_explicit_missing_registration(question: str, require_approval: bool) ->
     if supplements:
         latest = supplements[-1]
         supplied = _unique([match.group().upper() for match in REGISTRATION.finditer(latest)])
+        supplied = _unique(supplied + NAMED_MIGRATION_REGISTRATION.findall(latest.upper()))
+        bare = latest.strip(" 。？！.!?‘’“”\"'").upper()
+        if not supplied and re.fullmatch(MIGRATION_REGISTRATION, bare):
+            supplied = [bare]
         if len(supplied) == 1 and not (ILLUSTRATIVE_REGISTRATION.search(latest) or MISSING_REGISTRATION_FIELD.search(latest)):
             registration = supplied[0]
             return TaskPlan(
-                task_type=task_type, summary="按补充的目标登记证号检索原文", entities=[registration],
+                task_type=task_type, summary="按补充的目标登记证号检索登记资料", entities=[registration],
                 requires_approval=approval, steps=[PlanStep(
-                    id="documents", title="检索登记文档原文", tool="search_documents",
+                    id="documents", title="检索登记资料", tool="search_documents",
                     arguments={"query": registration, "registration_number": registration},
                 )],
             )
@@ -168,8 +176,8 @@ def fallback_plan(question: str, require_approval: bool = False, documents_enabl
         ]
         return TaskPlan(task_type="relation_path", summary="查找并解释两个实体之间的关系路径", entities=entities[:2], missing_information=missing, requires_approval=approval, steps=steps)
 
-    registration = REGISTRATION.search(question)
-    primary = registration.group(0).upper() if registration else entities[0] if entities else cleaned_subject(question)
+    registration = registration_value(question)
+    primary = registration if registration else entities[0] if entities else cleaned_subject(question)
     if not primary or FOLLOWUP.match(question):
         return TaskPlan(
             task_type="compliance_screen" if compliance else "fact_check", summary="确认需要查询的对象",
@@ -223,12 +231,20 @@ def cleaned_subject(question: str) -> str:
     return value[:80]
 
 
+def registration_value(question: str) -> str:
+    chinese = REGISTRATION.search(question)
+    if chinese:
+        return chinese.group().upper()
+    named = NAMED_MIGRATION_REGISTRATION.search(question)
+    return named.group(1).upper() if named else ""
+
+
 def document_step(question: str) -> PlanStep:
-    registration = REGISTRATION.search(question)
+    registration = registration_value(question)
     arguments = {"query": question[:512]}
     if registration:
-        arguments["registration_number"] = registration.group(0).upper()
-    return PlanStep(id="documents", title="检索登记文档原文", tool="search_documents", arguments=arguments)
+        arguments["registration_number"] = registration
+    return PlanStep(id="documents", title="检索登记资料", tool="search_documents", arguments=arguments)
 
 
 def followup_steps(

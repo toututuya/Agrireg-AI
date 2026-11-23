@@ -7,7 +7,7 @@ import pytest
 
 from agrireg_agent import planner_sft
 from agrireg_agent.planner import PLANNER_SYSTEM
-from agrireg_agent.planner_data import dataset_fingerprint, ensure_disjoint, make_dataset, read_dataset
+from agrireg_agent.planner_data import dataset_fingerprint, ensure_disjoint, read_dataset
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> Path:
@@ -16,7 +16,8 @@ def write_jsonl(path: Path, rows: list[dict]) -> Path:
 
 
 def example(kind: str) -> dict:
-    return next(row for row in make_dataset("train") if row["kind"] == kind)
+    path = Path(__file__).resolve().parents[1] / "evaluation" / "registry_planner_v1" / "train.jsonl"
+    return next(row for row in read_dataset(path) if row["kind"] == kind)
 
 
 def test_read_dataset_rebuilds_input_and_checks_runtime_tools(tmp_path):
@@ -59,7 +60,7 @@ def test_train_test_rejects_duplicate_normalized_questions(tmp_path):
 
 def test_three_way_preflight_rejects_split_variants(tmp_path, monkeypatch, capsys):
     group_id = "same-comparison-case"
-    train = example("comparison") | {"group_id": group_id, "source_ref": "synthetic:case-a"}
+    train = example("comparison") | {"group_id": group_id}
     dev = example("missing_comparison") | {"group_id": group_id}
     train_path = write_jsonl(tmp_path / "train.jsonl", [train])
     dev_path = write_jsonl(tmp_path / "dev.jsonl", [dev])

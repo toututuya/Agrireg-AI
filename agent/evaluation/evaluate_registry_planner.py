@@ -101,7 +101,10 @@ def step_evidence(tool: str, args: dict[str, str], snapshot: dict) -> set[str]:
     if tool == "find_relation_path":
         source = args["source"].upper()
         match = records.get(source)
-        return {source} if match and match["holder"].casefold() == args["target"].casefold() else set()
+        if not match:
+            return set()
+        targets = match.get("path_targets", [match["holder"]])
+        return {source} if args["target"].casefold() in {target.casefold() for target in targets} else set()
     if tool == "search_documents":
         key = args.get("registration_number", "").upper()
         if key:
@@ -109,7 +112,8 @@ def step_evidence(tool: str, args: dict[str, str], snapshot: dict) -> set[str]:
         query = args["query"].casefold()
         return {
             registration for registration, record in records.items()
-            if record["product"].casefold() in query and record["holder"].casefold() in query
+            if record["product"] and record["holder"]
+            and record["product"].casefold() in query and record["holder"].casefold() in query
         }
     if tool == "external_substance_lookup":
         return {

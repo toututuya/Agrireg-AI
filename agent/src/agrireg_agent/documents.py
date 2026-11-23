@@ -19,6 +19,7 @@ Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Identifier = Annotated[Text, StringConstraints(max_length=128)]
 SearchMode = Literal["dense", "bm25", "hybrid", "reranked"]
 CANDIDATES = 32
+RRF_K = 60
 CHUNK_LENGTH = 360
 CHUNK_OVERLAP = 48
 DENSE_DIM = 1024
@@ -187,23 +188,15 @@ class MilvusDocumentSearch:
             self.client.flush(self.collection, timeout=self.timeout)
         return total
 
-    def search(self, request: DocumentSearchRequest) -> list[DocumentHit]:
+    def _milvus_hits(self, request: DocumentSearchRequest, expr: str, limit: int) -> list[dict]:
         from pymilvus import AnnSearchRequest, RRFRanker
 
-        self._ensure_loaded()
-        query = request.query
-        mode = request.mode
-        if request.registration_number:
-            expr = "registration_number == " + json.dumps(request.registration_number, ensure_ascii=False)
-        else:
-            expr = ""
-        limit = CANDIDATES if mode == "reranked" else request.limit
         calls = []
-        if mode != "bm25":
-            dense = self.encode([query])[0].tolist()
+        if request.mode != "bm25":
+            dense = self.encode([request.query])[0].tolist()
             calls.append(("dense", [dense], {"metric_type": "COSINE"}))
-        if mode != "dense":
-            calls.append(("sparse", [query], {"metric_type": "BM25"}))
+        if request.mode != "dense":
+            calls.append(("sparse", [request.query], {"metric_type": "BM25"}))
         common = {
             "collection_name": self.collection,
             "output_fields": list(self.OUTPUT_FIELDS),
@@ -218,8 +211,48 @@ class MilvusDocumentSearch:
         else:
             result = self.client.hybrid_search(
                 reqs=[AnnSearchRequest(data, field, params, CANDIDATES, expr=expr) for field, data, params in calls],
-                ranker=RRFRanker(), **common,
+                ranker=RRFRanker(k=RRF_K), **common,
             )
+        return result[0] if result else []
+
+    def _registered_hits(self, request: DocumentSearchRequest, expr: str, limit: int) -> list[dict]:
+        # Load the exact subset before ranking. HNSW can miss a very selective filter.
+        candidates = self.client.query(
+            collection_name=self.collection, filter=expr,
+            output_fields=[*self.OUTPUT_FIELDS, "dense"], timeout=self.timeout,
+        )
+        if not candidates:
+            return []
+        vector = self.encode([request.query])[0].tolist()
+        dense = []
+        for candidate in candidates:
+            cosine = sum(left * right for left, right in zip(vector, candidate["dense"], strict=True))
+            dense.append({"id": candidate["chunk_id"], "entity": candidate, "distance": cosine})
+        dense.sort(key=lambda hit: (-hit["distance"], hit["id"]))
+        if request.mode == "dense":
+            return dense[:limit]
+
+        sparse = self._milvus_hits(request.model_copy(update={"mode": "bm25"}), expr, CANDIDATES)
+        hits, scores = {}, {}
+        for ranking in (dense[:CANDIDATES], sparse):
+            for rank, hit in enumerate(ranking, start=1):
+                chunk_id = hit["entity"].get("chunk_id") or hit.get("chunk_id") or hit["id"]
+                hits[chunk_id] = hit
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (RRF_K + rank)
+        ids = sorted(scores, key=lambda chunk_id: (-scores[chunk_id], chunk_id))[:limit]
+        return [hits[chunk_id] | {"distance": scores[chunk_id]} for chunk_id in ids]
+
+    def search(self, request: DocumentSearchRequest) -> list[DocumentHit]:
+        self._ensure_loaded()
+        mode = request.mode
+        expr = ""
+        if request.registration_number:
+            expr = "registration_number == " + json.dumps(request.registration_number, ensure_ascii=False)
+        limit = CANDIDATES if mode == "reranked" else request.limit
+        if expr and mode != "bm25":
+            ranked = self._registered_hits(request, expr, limit)
+        else:
+            ranked = self._milvus_hits(request, expr, limit)
         hits = [
             DocumentHit.model_validate({
                 **hit["entity"],
@@ -227,12 +260,12 @@ class MilvusDocumentSearch:
                 "page": hit["entity"]["page"] or None,
                 "score": hit["distance"],
             })
-            for hit in (result[0] if result else [])
+            for hit in ranked
         ]
         if mode == "reranked" and hits:
             with _model_lock:
                 reranker = _reranker(self.settings.reranker_model, self.settings.retrieval_device)
-            scores = reranker.predict([(query, hit.text) for hit in hits])
+            scores = reranker.predict([(request.query, hit.text) for hit in hits])
             hits = [hit.model_copy(update={"score": float(score)}) for hit, score in zip(hits, scores, strict=True)]
             hits.sort(key=lambda hit: hit.score, reverse=True)
         return hits[:request.limit]

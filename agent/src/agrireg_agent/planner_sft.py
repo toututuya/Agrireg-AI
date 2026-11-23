@@ -21,7 +21,6 @@ from .planner_data import (
     dataset_fingerprint,
     default_clarification_terms,
     ensure_disjoint,
-    make_dataset,
     read_dataset,
 )
 
@@ -161,7 +160,7 @@ class LocalQwenPlanner:
 
 
 def train(
-    base: str, output: Path, steps: int, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+    base: str, output: Path, steps: int, seed: int, four_bit: bool = False, *, dataset: Path,
     save_steps: int | None = None, init_adapter: Path | None = None, learning_rate: float = DEFAULT_LEARNING_RATE,
 ) -> None:
     if save_steps is not None and not 1 <= save_steps <= steps:
@@ -170,7 +169,7 @@ def train(
         raise ValueError("--learning-rate must be a positive finite number.")
     if init_adapter is not None and not (init_adapter / "adapter_config.json").is_file():
         raise ValueError("--init-adapter must point to a local adapter directory.")
-    rows = read_dataset(dataset) if dataset is not None else make_dataset("train", seed)
+    rows = read_dataset(dataset)
     import torch
     from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from torch.nn.utils.rnn import pad_sequence
@@ -323,10 +322,10 @@ def _score_plans(rows: list[dict], texts: dict[str, str]) -> dict:
 
 
 def evaluate(
-    base: str, adapter: str, output: Path, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+    base: str, adapter: str, output: Path, seed: int, four_bit: bool = False, *, dataset: Path,
 ) -> None:
-    rows = read_dataset(dataset) if dataset is not None else make_dataset("test", seed)
-    if dataset is not None and dataset.resolve() == output.resolve():
+    rows = read_dataset(dataset)
+    if dataset.resolve() == output.resolve():
         raise ValueError("Use a different output path to preserve the labeled dataset.")
     tokenizer, model = _load_model(base, "cuda", adapter, four_bit)
     model.eval()
@@ -336,7 +335,7 @@ def evaluate(
     print(f"Evaluating LoRA adapter on the same {len(rows)} cases.", flush=True)
     tuned = _measure(tokenizer, model, rows)
     results = {
-        "data": "labeled_jsonl" if dataset is not None else "synthetic_entity_and_template_holdout",
+        "data": "labeled_jsonl",
         "dataset_sha256": dataset_fingerprint(rows), "seed": seed, "four_bit": four_bit, "decoding": "greedy",
         "baseline": baseline, "lora": tuned,
     }
@@ -348,8 +347,6 @@ def evaluate(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train and evaluate the Qwen3 AgriReg planner")
     commands = parser.add_subparsers(dest="command", required=True)
-    data = commands.add_parser("data")
-    data.add_argument("--output", type=Path, required=True)
     fit = commands.add_parser("train")
     fit.add_argument("--base", default=BASE_MODEL)
     fit.add_argument("--output", type=Path, required=True)
@@ -369,19 +366,13 @@ def main() -> None:
     export = commands.add_parser("export-messages", help="Export labeled examples to messages JSONL")
     export.add_argument("--dataset", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
-    for command in (data, fit, check):
-        command.add_argument("--seed", type=int, default=42)
     for command in (fit, check):
+        command.add_argument("--seed", type=int, default=42)
         command.add_argument("--four-bit", action="store_true")
-        command.add_argument("--dataset", type=Path, help="Use a labeled JSONL file")
+        command.add_argument("--dataset", type=Path, required=True, help="Use a labeled JSONL file")
     args = parser.parse_args()
     try:
-        if args.command == "data":
-            for split in ("train", "test"):
-                rows = make_dataset(split, args.seed)
-                _write_jsonl(args.output / f"{split}.jsonl", rows)
-                print(f"{split}: {len(rows)}")
-        elif args.command == "check-data":
+        if args.command == "check-data":
             _check_data(args.train, args.test, args.base, dev_path=args.dev)
         elif args.command == "export-messages":
             _export_messages(args.dataset, args.output)
