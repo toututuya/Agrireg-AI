@@ -75,6 +75,8 @@ HTTP 地址为 `http://127.0.0.1:8092/mcp`。配置图谱 API 或 Milvus 后，�
 
 ## Qwen3 规划器 LoRA
 
+本地联调与实测指标见 [联调记录](evaluation/SMOKE_RESULTS_CN.md)。
+
 训练对象为 Qwen3-1.7B，关闭思考模式，用计划 JSON 监督工具选择、参数、缺参追问与审批标记。训练只对 assistant 输出计算损失，LoRA 更新注意力层的 Q、K、V、O 投影。合成数据按实体和问法模板留出，包含 336 条训练样本和 42 条测试样本。样本中的登记号只用于测试路由。
 
 ~~~bash
