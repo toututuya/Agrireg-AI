@@ -75,6 +75,8 @@ HTTP 地址为 `http://127.0.0.1:8092/mcp`。配置图谱 API 或 Milvus 后，�
 
 ## Qwen3 规划器 LoRA
 
+2026 年公开登记数据上的 1,000 道规划题、epoch 对照及复现命令见 [公开登记规划评测](evaluation/REGISTRY_PLANNER_CN.md)。
+
 本地联调与实测指标见 [联调记录](evaluation/SMOKE_RESULTS_CN.md)。
 
 自建标注、训练前校验及 GitHub 官方训练器的 `messages` 导出见 [规划数据流程](evaluation/PLANNER_DATA_CN.md)。

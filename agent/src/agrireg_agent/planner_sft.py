@@ -27,6 +27,7 @@ from .planner_data import (
 
 
 BASE_MODEL = "Qwen/Qwen3-1.7B"
+DEFAULT_LEARNING_RATE = 2e-4
 MAX_SEQUENCE = 768
 MAX_GENERATION = 320
 logger = logging.getLogger(__name__)
@@ -161,10 +162,17 @@ class LocalQwenPlanner:
 
 def train(
     base: str, output: Path, steps: int, seed: int, four_bit: bool = False, *, dataset: Path | None = None,
+    save_steps: int | None = None, init_adapter: Path | None = None, learning_rate: float = DEFAULT_LEARNING_RATE,
 ) -> None:
+    if save_steps is not None and not 1 <= save_steps <= steps:
+        raise ValueError("--save-steps must be between 1 and --steps.")
+    if not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("--learning-rate must be a positive finite number.")
+    if init_adapter is not None and not (init_adapter / "adapter_config.json").is_file():
+        raise ValueError("--init-adapter must point to a local adapter directory.")
     rows = read_dataset(dataset) if dataset is not None else make_dataset("train", seed)
     import torch
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from torch.nn.utils.rnn import pad_sequence
     from transformers import Trainer, TrainingArguments, set_seed
 
@@ -177,10 +185,13 @@ def train(
     if four_bit:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
     model.config.use_cache = False
-    model = get_peft_model(model, LoraConfig(
-        r=8, lora_alpha=16, lora_dropout=0.05, task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    ))
+    if init_adapter is None:
+        model = get_peft_model(model, LoraConfig(
+            r=8, lora_alpha=16, lora_dropout=0.05, task_type="CAUSAL_LM",
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        ))
+    else:
+        model = PeftModel.from_pretrained(model, str(init_adapter), is_trainable=True)
     training_rows = [training_sequence(tokenizer, row) for row in rows]
 
     def collate(examples):
@@ -195,20 +206,24 @@ def train(
     trainer = Trainer(
         model=model, train_dataset=training_rows, data_collator=collate,
         args=TrainingArguments(
-            output_dir=str(output), max_steps=steps, learning_rate=2e-4, seed=seed,
+            output_dir=str(output), max_steps=steps, learning_rate=learning_rate, seed=seed,
             per_device_train_batch_size=1, gradient_accumulation_steps=4, bf16=True,
             gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
-            save_strategy="no", logging_steps=5, disable_tqdm=True, report_to="none",
+            save_strategy="steps" if save_steps is not None else "no", save_steps=save_steps or 500,
+            save_only_model=True, logging_steps=5, disable_tqdm=True, report_to="none",
         ),
     )
     result = trainer.train()
     model.save_pretrained(output, safe_serialization=True)
     summary = {
         "base": base, "seed": seed, "four_bit": four_bit, "rows": len(rows), "optimizer_steps": result.global_step,
+        "learning_rate": learning_rate,
         "dataset_sha256": dataset_fingerprint(rows),
         "loss": result.training_loss, "peak_allocated_mib": round(torch.cuda.max_memory_allocated() / 2**20),
         "seconds": result.metrics["train_runtime"],
     }
+    if init_adapter is not None:
+        summary["init_adapter"] = str(init_adapter)
     (output / "training_metrics.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
@@ -339,6 +354,9 @@ def main() -> None:
     fit.add_argument("--base", default=BASE_MODEL)
     fit.add_argument("--output", type=Path, required=True)
     fit.add_argument("--steps", type=int, default=64)
+    fit.add_argument("--save-steps", type=int, help="Save a model-only checkpoint at this optimizer-step interval")
+    fit.add_argument("--init-adapter", type=Path, help="Initialize from a local adapter with a fresh optimizer")
+    fit.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
     check = commands.add_parser("evaluate")
     check.add_argument("--base", default=BASE_MODEL)
     check.add_argument("--adapter", required=True)
@@ -370,7 +388,9 @@ def main() -> None:
         elif args.command == "train":
             if args.steps < 1:
                 parser.error("--steps must be positive.")
-            train(args.base, args.output, args.steps, args.seed, args.four_bit, dataset=args.dataset)
+            train(args.base, args.output, args.steps, args.seed, args.four_bit,
+                  dataset=args.dataset, save_steps=args.save_steps, init_adapter=args.init_adapter,
+                  learning_rate=args.learning_rate)
         else:
             evaluate(args.base, args.adapter, args.output, args.seed, args.four_bit, dataset=args.dataset)
     except (ValueError, OSError) as exc:

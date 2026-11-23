@@ -1,0 +1,281 @@
+{
+  "comparison": "warm_start_from_epoch3_with_fresh_optimizer",
+  "original_epoch3_decision_counts_reproduced": true,
+  "training": {
+    "base": "Qwen/Qwen3-1.7B",
+    "seed": 42,
+    "four_bit": true,
+    "rows": 700,
+    "optimizer_steps": 350,
+    "learning_rate": 5e-05,
+    "dataset_sha256": "87083dae9c6146f6374db1a81bf59ffe80644ca4d593ec5cc9a6b0291e6c7c03",
+    "loss": 3.094639761132255e-05,
+    "peak_allocated_mib": 3239,
+    "seconds": 573.8181,
+    "init_adapter": "checkpoint-525"
+  },
+  "development": {
+    "dataset_sha256": "f1c01aa300d01dbd3ca912b99d2eb9243cf8634003830d27286e66d429e6c39d",
+    "selected_epoch": 5,
+    "epochs": {
+      "3": {
+        "cases": 100,
+        "json": 100,
+        "valid": 95,
+        "intent_and_tool": 78,
+        "exact_actions": 73,
+        "decision_checks": {
+          "missing_parameters": {
+            "cases": 40,
+            "proposed_call": 16,
+            "matched_clarification_without_call": 20
+          },
+          "ready": {
+            "cases": 60,
+            "unnecessary_clarification": 1,
+            "matched_critical_actions": 54
+          }
+        },
+        "by_intent": {
+          "document": {
+            "cases": 20,
+            "clarified": 0,
+            "exact_actions": 20
+          },
+          "missing_registration": {
+            "cases": 20,
+            "clarified": 9,
+            "exact_actions": 9
+          },
+          "comparison": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 6
+          },
+          "missing_comparison": {
+            "cases": 10,
+            "clarified": 5,
+            "exact_actions": 5
+          },
+          "external": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "path": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 10
+          },
+          "missing_path": {
+            "cases": 10,
+            "clarified": 10,
+            "exact_actions": 6
+          },
+          "graph": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "compliance": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "keyword_document": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 3
+          },
+          "joint_lookup": {
+            "cases": 4,
+            "clarified": 1,
+            "exact_actions": 2
+          }
+        },
+        "balanced_score": 0.7
+      },
+      "4": {
+        "cases": 100,
+        "json": 100,
+        "valid": 95,
+        "intent_and_tool": 77,
+        "exact_actions": 75,
+        "decision_checks": {
+          "missing_parameters": {
+            "cases": 40,
+            "proposed_call": 16,
+            "matched_clarification_without_call": 22
+          },
+          "ready": {
+            "cases": 60,
+            "unnecessary_clarification": 1,
+            "matched_critical_actions": 53
+          }
+        },
+        "by_intent": {
+          "document": {
+            "cases": 20,
+            "clarified": 0,
+            "exact_actions": 20
+          },
+          "missing_registration": {
+            "cases": 20,
+            "clarified": 9,
+            "exact_actions": 9
+          },
+          "comparison": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 5
+          },
+          "missing_comparison": {
+            "cases": 10,
+            "clarified": 5,
+            "exact_actions": 5
+          },
+          "external": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "path": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 10
+          },
+          "missing_path": {
+            "cases": 10,
+            "clarified": 10,
+            "exact_actions": 8
+          },
+          "graph": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "compliance": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "keyword_document": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "joint_lookup": {
+            "cases": 4,
+            "clarified": 1,
+            "exact_actions": 2
+          }
+        },
+        "balanced_score": 0.7166666666666667
+      },
+      "5": {
+        "cases": 100,
+        "json": 100,
+        "valid": 95,
+        "intent_and_tool": 78,
+        "exact_actions": 77,
+        "decision_checks": {
+          "missing_parameters": {
+            "cases": 40,
+            "proposed_call": 15,
+            "matched_clarification_without_call": 24
+          },
+          "ready": {
+            "cases": 60,
+            "unnecessary_clarification": 1,
+            "matched_critical_actions": 53
+          }
+        },
+        "by_intent": {
+          "document": {
+            "cases": 20,
+            "clarified": 0,
+            "exact_actions": 20
+          },
+          "missing_registration": {
+            "cases": 20,
+            "clarified": 10,
+            "exact_actions": 10
+          },
+          "comparison": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 5
+          },
+          "missing_comparison": {
+            "cases": 10,
+            "clarified": 5,
+            "exact_actions": 5
+          },
+          "external": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "path": {
+            "cases": 10,
+            "clarified": 0,
+            "exact_actions": 10
+          },
+          "missing_path": {
+            "cases": 10,
+            "clarified": 10,
+            "exact_actions": 9
+          },
+          "graph": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "compliance": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "keyword_document": {
+            "cases": 4,
+            "clarified": 0,
+            "exact_actions": 4
+          },
+          "joint_lookup": {
+            "cases": 4,
+            "clarified": 1,
+            "exact_actions": 2
+          }
+        },
+        "balanced_score": 0.7416666666666667
+      }
+    },
+    "selection": "max_mean_of_ready_critical_action_and_correct_non_call_clarification_rates; fewer_missing_calls; earlier_epoch",
+    "four_bit": true,
+    "decoding": "greedy",
+    "batch_size": 12,
+    "wall_seconds": 241.683
+  },
+  "hardware": "NVIDIA GeForce RTX 3090",
+  "versions": {
+    "torch": "2.5.1+cu121",
+    "transformers": "4.55.4",
+    "peft": "0.17.1",
+    "accelerate": "1.10.1",
+    "bitsandbytes": "0.46.1"
+  },
+  "checkpoints": {
+    "3": {
+      "cumulative_optimizer_steps": 525,
+      "adapter_sha256": "626dc92a11f4333d5894065bad75da8d9dad121929194bc685f4c01246222f54"
+    },
+    "4": {
+      "cumulative_optimizer_steps": 700,
+      "adapter_sha256": "d2d235e0ed1ccd5d1f2813bd52a77b13a13922271a640c1e69c06ce67c08c46e"
+    },
+    "5": {
+      "cumulative_optimizer_steps": 875,
+      "adapter_sha256": "4c5b2b1d9ab1ca4e9ee1e8e7c50d8f9e9a4b2a1cd6b38f03ef02218398b2545f"
+    }
+  }
+}

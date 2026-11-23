@@ -1,0 +1,20 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "checkpoint": "checkpoint-525",
+  "adapter_sha256": "626dc92a11f4333d5894065bad75da8d9dad121929194bc685f4c01246222f54",
+  "base_config_sha256": "1ddb5b89ebc90dcb417a45c213d818577e65976454d29385c8f6140771d95197",
+  "tokenizer_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+  "hardware": "NVIDIA GeForce RTX 3090",
+  "tool_loader_smoke": {
+    "id": "moa-2026-11-PD20262785-document",
+    "tool": "search_documents",
+    "passed": true
+  },
+  "versions": {
+    "torch": "2.5.1+cu121",
+    "transformers": "4.55.4",
+    "peft": "0.17.1",
+    "accelerate": "1.10.1",
+    "bitsandbytes": "0.46.1"
+  }
+}

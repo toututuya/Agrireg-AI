@@ -1,0 +1,428 @@
+{
+  "dataset_sha256": "7226666928d611b6d2bcd5db2bfe1c9f672f5e963b38ba22e8ed8be726c68e56",
+  "train_sha256": "87083dae9c6146f6374db1a81bf59ffe80644ca4d593ec5cc9a6b0291e6c7c03",
+  "dev_sha256": "f1c01aa300d01dbd3ca912b99d2eb9243cf8634003830d27286e66d429e6c39d",
+  "registry_snapshot_sha256": "486fc6e71bf480058d6f97c39a2b1aa68074dceba10e235fb91527c46c47c608",
+  "test_replay_sha256": "c6a4542f7735dbf3dc7c642ef47a728a46d0948c3bd58e328a422ab5cff214d7",
+  "selected_epoch": 3,
+  "checkpoint": "checkpoint-525",
+  "seed": 42,
+  "base": "Qwen/Qwen3-1.7B",
+  "four_bit": true,
+  "decoding": "greedy",
+  "batch_size": 12,
+  "rule_fallback": {
+    "cases": 200,
+    "json": 200,
+    "valid": 200,
+    "intent_and_tool": 64,
+    "exact_actions": 8,
+    "decision_checks": {
+      "missing_parameters": {
+        "cases": 80,
+        "proposed_call": 40,
+        "matched_clarification_without_call": 0
+      },
+      "ready": {
+        "cases": 120,
+        "unnecessary_clarification": 0,
+        "matched_critical_actions": 24
+      }
+    },
+    "by_intent": {
+      "document": {
+        "cases": 40,
+        "clarified": 0
+      },
+      "missing_registration": {
+        "cases": 40,
+        "clarified": 0
+      },
+      "comparison": {
+        "cases": 20,
+        "clarified": 0
+      },
+      "missing_comparison": {
+        "cases": 20,
+        "clarified": 20
+      },
+      "external": {
+        "cases": 8,
+        "clarified": 0
+      },
+      "path": {
+        "cases": 20,
+        "clarified": 0
+      },
+      "missing_path": {
+        "cases": 20,
+        "clarified": 20
+      },
+      "graph": {
+        "cases": 8,
+        "clarified": 0,
+        "exact_actions": 8
+      },
+      "compliance": {
+        "cases": 8,
+        "clarified": 0
+      },
+      "keyword_document": {
+        "cases": 8,
+        "clarified": 0
+      },
+      "joint_lookup": {
+        "cases": 8,
+        "clarified": 0
+      }
+    },
+    "snapshot_ready": {
+      "success": 24,
+      "cases": 120
+    },
+    "two_turn": {
+      "success": 0,
+      "after_expected_reply": 20,
+      "cases": 80
+    },
+    "snapshot_by_kind": {
+      "document": {
+        "cases": 40,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_registration": {
+        "cases": 40,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 40,
+        "after_expected_reply": 0,
+        "two_turn_success": 0
+      },
+      "comparison": {
+        "cases": 20,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_comparison": {
+        "cases": 20,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 0,
+        "after_expected_reply": 0,
+        "two_turn_success": 0
+      },
+      "external": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "path": {
+        "cases": 20,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_path": {
+        "cases": 20,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 0,
+        "after_expected_reply": 20,
+        "two_turn_success": 0
+      },
+      "graph": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 8
+      },
+      "compliance": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 8
+      },
+      "keyword_document": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "joint_lookup": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 8
+      }
+    },
+    "wall_seconds": 0.016
+  },
+  "qwen3_base": {
+    "cases": 200,
+    "json": 184,
+    "valid": 0,
+    "intent_and_tool": 0,
+    "exact_actions": 0,
+    "decision_checks": {
+      "missing_parameters": {
+        "cases": 80,
+        "proposed_call": 77,
+        "matched_clarification_without_call": 0
+      },
+      "ready": {
+        "cases": 120,
+        "unnecessary_clarification": 0,
+        "matched_critical_actions": 0
+      }
+    },
+    "by_intent": {
+      "document": {
+        "cases": 40
+      },
+      "missing_registration": {
+        "cases": 40
+      },
+      "comparison": {
+        "cases": 20
+      },
+      "missing_comparison": {
+        "cases": 20
+      },
+      "external": {
+        "cases": 8
+      },
+      "path": {
+        "cases": 20
+      },
+      "missing_path": {
+        "cases": 20
+      },
+      "graph": {
+        "cases": 8
+      },
+      "compliance": {
+        "cases": 8
+      },
+      "keyword_document": {
+        "cases": 8
+      },
+      "joint_lookup": {
+        "cases": 8
+      }
+    },
+    "snapshot_ready": {
+      "success": 0,
+      "cases": 120
+    },
+    "two_turn": {
+      "success": 0,
+      "after_expected_reply": 0,
+      "cases": 80
+    },
+    "snapshot_by_kind": {
+      "document": {
+        "cases": 40,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_registration": {
+        "cases": 40,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 37,
+        "after_expected_reply": 0,
+        "two_turn_success": 0
+      },
+      "comparison": {
+        "cases": 20,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_comparison": {
+        "cases": 20,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 20,
+        "after_expected_reply": 0,
+        "two_turn_success": 0
+      },
+      "external": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "path": {
+        "cases": 20,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "missing_path": {
+        "cases": 20,
+        "matched_clarification_without_call": 0,
+        "proposed_call": 20,
+        "after_expected_reply": 0,
+        "two_turn_success": 0
+      },
+      "graph": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "compliance": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "keyword_document": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "joint_lookup": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      }
+    },
+    "wall_seconds": 518.786
+  },
+  "qwen3_lora": {
+    "cases": 200,
+    "json": 200,
+    "valid": 182,
+    "intent_and_tool": 173,
+    "exact_actions": 159,
+    "decision_checks": {
+      "missing_parameters": {
+        "cases": 80,
+        "proposed_call": 13,
+        "matched_clarification_without_call": 58
+      },
+      "ready": {
+        "cases": 120,
+        "unnecessary_clarification": 0,
+        "matched_critical_actions": 103
+      }
+    },
+    "by_intent": {
+      "document": {
+        "cases": 40,
+        "clarified": 0,
+        "exact_actions": 40
+      },
+      "missing_registration": {
+        "cases": 40,
+        "clarified": 27,
+        "exact_actions": 27
+      },
+      "comparison": {
+        "cases": 20,
+        "clarified": 0,
+        "exact_actions": 20
+      },
+      "missing_comparison": {
+        "cases": 20,
+        "clarified": 20,
+        "exact_actions": 20
+      },
+      "external": {
+        "cases": 8,
+        "clarified": 0,
+        "exact_actions": 8
+      },
+      "path": {
+        "cases": 20,
+        "clarified": 0,
+        "exact_actions": 16
+      },
+      "missing_path": {
+        "cases": 20,
+        "clarified": 20,
+        "exact_actions": 11
+      },
+      "graph": {
+        "cases": 8,
+        "clarified": 0,
+        "exact_actions": 8
+      },
+      "compliance": {
+        "cases": 8,
+        "clarified": 0
+      },
+      "keyword_document": {
+        "cases": 8,
+        "clarified": 0,
+        "exact_actions": 6
+      },
+      "joint_lookup": {
+        "cases": 8,
+        "clarified": 0,
+        "exact_actions": 3
+      }
+    },
+    "snapshot_ready": {
+      "success": 102,
+      "cases": 120
+    },
+    "two_turn": {
+      "success": 58,
+      "after_expected_reply": 79,
+      "cases": 80
+    },
+    "snapshot_by_kind": {
+      "document": {
+        "cases": 40,
+        "matched_critical_actions": 40,
+        "snapshot_success": 40
+      },
+      "missing_registration": {
+        "cases": 40,
+        "matched_clarification_without_call": 27,
+        "proposed_call": 13,
+        "after_expected_reply": 40,
+        "two_turn_success": 27
+      },
+      "comparison": {
+        "cases": 20,
+        "matched_critical_actions": 20,
+        "snapshot_success": 20
+      },
+      "missing_comparison": {
+        "cases": 20,
+        "matched_clarification_without_call": 20,
+        "proposed_call": 0,
+        "after_expected_reply": 20,
+        "two_turn_success": 20
+      },
+      "external": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 8
+      },
+      "path": {
+        "cases": 20,
+        "matched_critical_actions": 16,
+        "snapshot_success": 16
+      },
+      "missing_path": {
+        "cases": 20,
+        "matched_clarification_without_call": 11,
+        "proposed_call": 0,
+        "after_expected_reply": 19,
+        "two_turn_success": 11
+      },
+      "graph": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 8
+      },
+      "compliance": {
+        "cases": 8,
+        "matched_critical_actions": 0,
+        "snapshot_success": 0
+      },
+      "keyword_document": {
+        "cases": 8,
+        "matched_critical_actions": 8,
+        "snapshot_success": 7
+      },
+      "joint_lookup": {
+        "cases": 8,
+        "matched_critical_actions": 3,
+        "snapshot_success": 3
+      }
+    },
+    "wall_seconds": 214.712
+  }
+}
