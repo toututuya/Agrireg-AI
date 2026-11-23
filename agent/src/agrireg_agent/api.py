@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator
+from typing import Annotated, AsyncIterator
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .config import get_settings
+from .documents import DocumentHit, DocumentSearchRequest, MilvusDocumentSearch, get_document_search
 from .models import CreateThreadRequest, ResumeRunRequest, StartRunRequest
 from .runtime import AgentRuntime
 from .store import TERMINAL_STATUSES
@@ -35,6 +36,16 @@ app.add_middleware(
 @app.get("/api/agent/health")
 def health() -> dict[str, object]:
     return {"status": "ok", "modelPlanning": runtime.llm.enabled, "persistence": "sqlite"}
+
+
+@app.post("/api/agent/documents/search")
+def search_documents(
+    payload: DocumentSearchRequest,
+    documents: Annotated[MilvusDocumentSearch | None, Depends(get_document_search)],
+) -> list[DocumentHit]:
+    if documents is None:
+        raise HTTPException(status_code=503, detail="登记文档检索尚未配置。")
+    return documents.search(payload)
 
 
 @app.get("/api/agent/threads")
