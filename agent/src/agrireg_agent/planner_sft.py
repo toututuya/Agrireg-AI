@@ -47,7 +47,8 @@ def _load_model(base: str, device: str, adapter: str = "", four_bit: bool = Fals
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
     options = {"torch_dtype": dtype, "use_safetensors": True, "attn_implementation": "sdpa"}
     if four_bit:
-        options["device_map"] = {"": device}
+        target = torch.device("cuda", torch.cuda.current_device()) if device == "cuda" else torch.device(device)
+        options["device_map"] = {"": target}
         options["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=dtype,
