@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from .config import get_settings
 from .documents import DocumentHit, DocumentSearchRequest, MilvusDocumentSearch, get_document_search
-from .models import CreateThreadRequest, ResumeRunRequest, StartRunRequest
+from .models import CreateThreadRequest, QuestionRequest, ResumeRunRequest, StartRunRequest
 from .runtime import AgentRuntime
 from .store import EVENT_PAGE_SIZE, TERMINAL_STATUSES
 from .task_queue import split_subtasks
@@ -50,6 +50,11 @@ def search_documents(
     if documents is None:
         raise HTTPException(status_code=503, detail="登记文档检索尚未配置。")
     return documents.search(payload)
+
+
+@app.post("/api/agent/answer")
+def answer_from_documents_or_general_knowledge(payload: QuestionRequest) -> dict[str, object]:
+    return runtime.answer(payload.question.strip())
 
 
 @app.get("/api/agent/threads")

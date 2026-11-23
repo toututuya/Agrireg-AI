@@ -8,9 +8,11 @@ from typing import Any
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+from .answering import answer_without_graph
 from .clients import ControlledTools, DeepSeekClient
 from .config import Settings
 from .graph import build_agent_graph
+from .memory import capture_episode, parse_memory_command
 from .planner_sft import LocalQwenPlanner
 from .store import RunStore
 from .task_queue import MAX_SUBTASKS
@@ -37,22 +39,26 @@ class AgentRuntime:
             self.planner = LocalQwenPlanner(
                 settings.qwen_base, settings.qwen_adapter, settings.qwen_device, settings.qwen_four_bit,
             )
+        self.answer_model = self.planner.base_completion if isinstance(self.planner, LocalQwenPlanner) else None
         self.graph = build_agent_graph(
             self.tools, self.llm, self.checkpointer,
             planner=self.planner, documents_enabled=bool(settings.milvus_uri), max_tool_steps=settings.max_tool_steps,
-            max_tool_attempts=settings.max_tool_attempts,
+            max_tool_attempts=settings.max_tool_attempts, answer_model=self.answer_model,
         )
         self._tasks: set[asyncio.Task[Any]] = set()
 
+    def answer(self, question: str) -> dict[str, Any]:
+        return answer_without_graph(question, self.tools, self.answer_model)
+
     def start_run(self, run_id: str) -> None:
-        self._spawn(self._drive_async(run_id, self._initial_payload(run_id)))
+        self._spawn(self._drive_async(run_id, None))
 
     def _initial_payload(self, run_id: str) -> dict[str, Any]:
         run = self.store.get_run(run_id)
         return {
             "question": run["question"],
             "require_approval": run["requireApproval"],
-            "context": self.store.planning_context(run_id, run["threadId"]),
+            "context": self.store.planning_context(run["id"], run["threadId"]),
             "tool_results": [],
             "evidence": [],
             "events": [],
@@ -80,6 +86,10 @@ class AgentRuntime:
         try:
             if payload is None and not self.graph.get_state(config).values:
                 payload = self._initial_payload(run_id)
+                command = parse_memory_command(payload["question"])
+                if command is not None:
+                    self.store.answer_memory(run_id, command)
+                    return
             interrupt_payload = None
             for chunk in self.graph.stream(payload, config, stream_mode="updates", durability="sync"):
                 if "__interrupt__" in chunk:
@@ -120,7 +130,9 @@ class AgentRuntime:
             values = snapshot.values if snapshot else {}
             report = values.get("report", "") if isinstance(values, dict) else ""
             final_status = "rejected" if values.get("approval_decision") == "reject" else "completed"
-            self.store.update_run(run_id, final_status, report=report, interrupt_json=None, error=None)
+            self.store.update_run(
+                run_id, final_status, episode=capture_episode(values), report=report, interrupt_json=None, error=None,
+            )
         except Exception as exc:
             self.store.append_event(
                 run_id,

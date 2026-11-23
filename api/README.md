@@ -12,9 +12,9 @@ Copy-Item .env.example .env.local
 .\start-local.ps1
 ```
 
-DeepSeek 默认关闭，问答接口会直接返回 Neo4j 中可引用的释义和关系。需要模型综合回答时，在 `.env.local` 设置 `DEEPSEEK_ENABLED=true` 和 `DEEPSEEK_API_KEY`。配置后的默认模型为 `deepseek-v4-flash`，关闭思考模式。
+DeepSeek 默认关闭，问答接口直接引用 Neo4j 中的释义和关系。设置 `AGENT_ANSWER_URL` 后，缺少合适图谱证据时可通过 Agent 按登记号查登记资料，或让 Qwen3 基础模型解释通用概念。对于已挂载的登记快照，回答会标明快照来源。需要 DeepSeek 综合图谱证据时，可设置 `DEEPSEEK_ENABLED=true` 和 `DEEPSEEK_API_KEY`。
 
-对话历史默认保存在 H2 文件数据库 `data/agrireg-chat*`。API 每次只取最近两轮消息作为指代解析上下文，完整问题、回答、识别实体和图谱证据仍可从历史接口恢复。`data/` 已被 Git 忽略。
+对话历史默认保存在 H2 文件数据库 `data/agrireg-chat*`。使用 DeepSeek 解析指代时可读取最近两轮。完整问题、回答、识别实体和证据可从历史接口恢复。`data/` 已被 Git 忽略。
 
 ## 查询约束
 

@@ -2,6 +2,9 @@ package com.sc.pesticideknowledgemappingsystem.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -10,11 +13,13 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,6 +39,7 @@ import java.util.regex.Pattern;
 @Service
 public class DeepSeekGraphAssistantService {
 
+    private static final Logger log = LoggerFactory.getLogger(DeepSeekGraphAssistantService.class);
     private static final int MAX_SEARCH_TERMS = 3;
     private static final int MAX_EVIDENCE = 36;
     private static final int MAX_DIRECT_EVIDENCE = 6;
@@ -50,6 +56,16 @@ public class DeepSeekGraphAssistantService {
                     + "(?<![A-Z0-9-])((?:PD|WP|LS|WL|EX)\\d{5,12}|\\d{2}[A-Z0-9]\\d{3}-\\d{2}|\\d{4}-\\d{3})(?![A-Z0-9-])",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern DEFINITION_QUESTION = Pattern.compile(
+            "^(?:请问\\s*)?(?:(?:什么是|何谓)\\s*[^。！？?!，；;\\n]{1,80}|"
+                    + "[^。！？?!，；;\\n]{1,80}(?:是什么|是啥|是什么意思))[\\s。！？?!]*$"
+    );
+    private static final Pattern ASK_FOR_SOURCE = Pattern.compile("原文|文档|附件|标签|说明书|登记资料");
+    private static final Pattern APPLIED_JUDGMENT = Pattern.compile(
+            "合规|禁用|剂量|用量|稀释|混配|怎么(?:用|喷|施)|如何(?:用药|施药|喷药)|"
+                    + "(?:能否|能不能|可不可以|是否允许|可以).{0,12}(?:使用|用药|喷|施)"
+    );
+    private static final Pattern FOLLOW_UP = Pattern.compile("^(?:那(?:么|，|,|\\s)*)?(?:它|该成分|该产品|这张证)");
 
     @Autowired
     private GraphExploreService graphExploreService;
@@ -69,6 +85,9 @@ public class DeepSeekGraphAssistantService {
     @Value("${deepseek.model:deepseek-v4-flash}")
     private String model;
 
+    @Value("${assistant.agent-answer-url:}")
+    private String agentAnswerUrl;
+
     private boolean isConfigured() {
         return enabled && notBlank(apiKey);
     }
@@ -79,30 +98,111 @@ public class DeepSeekGraphAssistantService {
 
     public Map<String, Object> ask(String question, List<Map<String, String>> conversationContext) throws Exception {
         boolean useModel = isConfigured();
-        List<String> searchTerms = useModel
-                ? planSearchTerms(question, conversationContext)
-                : localSearchTerms(question);
-        List<Map<String, Object>> evidence = retrieveEvidence(searchTerms);
+        List<String> searchTerms = localSearchTerms(question);
+        if (useModel && FOLLOW_UP.matcher(question).find()) {
+            try {
+                searchTerms = planSearchTerms(question, conversationContext);
+            } catch (Exception e) {
+                log.warn("Question entity planning unavailable: {}", e.getClass().getSimpleName());
+            }
+        } else if (useModel && !hasExplicitHint(question)) {
+            try {
+                searchTerms = planSearchTerms(question, Collections.emptyList());
+            } catch (Exception e) {
+                log.warn("Question entity planning unavailable: {}", e.getClass().getSimpleName());
+            }
+        }
+        List<Map<String, Object>> evidence;
+        boolean definitionRequest = DEFINITION_QUESTION.matcher(question).matches();
+        try {
+            evidence = retrieveEvidence(searchTerms, definitionRequest && searchTerms.size() == 1);
+        } catch (RuntimeException e) {
+            log.warn("Graph evidence unavailable: {}", e.getClass().getSimpleName());
+            evidence = Collections.emptyList();
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("question", question);
         result.put("focusEntities", searchTerms);
         result.put("evidence", evidence);
         result.put("grounded", !evidence.isEmpty());
-        result.put("model", useModel ? model : "graph-evidence");
+        result.put("model", "graph-evidence");
+        result.put("mode", "graph");
 
-        if (evidence.isEmpty()) {
-            result.put("answer", "当前图谱没有检索到足够的关联信息。可以换用具体的农药名称、作物名称、病虫害名称或有效成分再提问。");
-            result.put("followUps", Arrays.asList("查询一个具体农药的适用作物", "查询某种病害对应的防治药剂"));
+        boolean needsDocument = ASK_FOR_SOURCE.matcher(question).find();
+        boolean needsJudgment = APPLIED_JUDGMENT.matcher(question).find();
+        boolean missingDefinition = definitionRequest
+                && evidence.stream().noneMatch(fact -> DEFINITION_LABEL.equals(fact.get("property")));
+        if (evidence.isEmpty() || missingDefinition || needsDocument || needsJudgment) {
+            Map<String, Object> answer = agentAnswer(question);
+            if (answer != null) {
+                result.putAll(answer);
+                return result;
+            }
+        }
+        if (needsJudgment || needsDocument) {
+            result.put("answer", "需要核对对应的登记文件或产品标签。请提供目标登记号或原文。");
+            result.put("grounded", false);
+            result.put("mode", "unsupported");
+            result.put("evidence", Collections.emptyList());
+            result.put("followUps", Collections.emptyList());
             return result;
         }
 
-        String answer = useModel
-                ? answerFromEvidence(question, evidence, conversationContext)
-                : renderGraphAnswer(question, evidence);
+        if (evidence.isEmpty()) {
+            result.put("answer", "暂时没有查到这项信息。可以补充作物、病害、有效成分或登记号。");
+            result.put("mode", "unsupported");
+            result.put("followUps", Collections.emptyList());
+            return result;
+        }
+
+        String answer = renderGraphAnswer(question, evidence);
+        if (useModel && !definitionRequest) {
+            try {
+                answer = answerFromEvidence(question, evidence, Collections.emptyList());
+                result.put("model", model);
+            } catch (Exception e) {
+                log.warn("Grounded answer unavailable: {}", e.getClass().getSimpleName());
+            }
+        }
         result.put("answer", answer);
         result.put("followUps", buildFollowUps(evidence));
         return result;
+    }
+
+    private boolean hasExplicitHint(String question) {
+        return ENTITY_HINT.matcher(question).find();
+    }
+
+    private Map<String, Object> agentAnswer(String question) {
+        if (!notBlank(agentAnswerUrl)) return null;
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(1500);
+        factory.setReadTimeout(20000);
+        try {
+            JsonNode payload = new RestTemplate(factory).postForObject(
+                    agentAnswerUrl, Collections.singletonMap("question", question), JsonNode.class
+            );
+            if (payload == null || !notBlank(payload.path("answer").asText())
+                    || !Arrays.asList("document", "general", "unsupported", "unavailable").contains(payload.path("mode").asText())) {
+                return null;
+            }
+            Map<String, Object> answer = new LinkedHashMap<>();
+            answer.put("answer", payload.path("answer").asText());
+            answer.put("mode", payload.path("mode").asText());
+            answer.put("model", payload.path("model").asText());
+            boolean grounded = "document".equals(payload.path("mode").asText())
+                    && payload.path("evidence").isArray() && payload.path("evidence").size() > 0;
+            answer.put("grounded", grounded);
+            answer.put("evidence", grounded ? objectMapper.convertValue(
+                    payload.path("evidence"), new TypeReference<List<Map<String, Object>>>() {}
+            ) : Collections.emptyList());
+            answer.put("followUps", Collections.emptyList());
+            return answer;
+        } catch (RestClientException | IllegalArgumentException e) {
+            log.warn("Agent answer service unavailable: {}", e.getClass().getSimpleName());
+            return null;
+        }
     }
 
     private List<String> localSearchTerms(String question) {
@@ -124,7 +224,7 @@ public class DeepSeekGraphAssistantService {
     }
 
     private String renderGraphAnswer(String question, List<Map<String, Object>> evidence) {
-        if (question.matches(".*(?:什么是|何谓|是什么|是啥|是什么意思).*")) {
+        if (DEFINITION_QUESTION.matcher(question).matches()) {
             for (Map<String, Object> fact : evidence) {
                 if (DEFINITION_LABEL.equals(fact.get("property"))) {
                     return fact.get("value") + " [" + fact.get("index") + "]";
@@ -133,14 +233,50 @@ public class DeepSeekGraphAssistantService {
             return "图谱找到了相关记录，现有证据缺少可引用的释义。可以展开证据查看关联信息。";
         }
         List<String> lines = new ArrayList<>();
-        for (Map<String, Object> fact : evidence) {
+        List<Map<String, Object>> ranked = new ArrayList<>(evidence);
+        if (question.matches("(?s).*(关联|关系|登记作物|防治对象|侵染|有效成分).*")) {
+            ranked.sort(Comparator.comparingInt(fact -> relationshipRelevance(question, fact)));
+        }
+        for (Map<String, Object> fact : ranked) {
             String details = "attribute".equals(fact.get("factType"))
                     ? String.valueOf(fact.get("targetName"))
-                    : "「" + fact.get("sourceName") + "」→「" + fact.get("targetName") + "」（" + fact.get("relation") + "）";
+                    : relationshipDescription(fact);
             lines.add(details + " [" + fact.get("index") + "]");
             if (lines.size() == 3) break;
         }
         return String.join("\n", lines);
+    }
+
+    private int relationshipRelevance(String question, Map<String, Object> fact) {
+        if ("attribute".equals(fact.get("factType"))) return 2;
+        String relation = String.valueOf(fact.get("relation"));
+        if (("APPLIED_TO".equals(relation) && question.contains("作物"))
+                || ("TREATS".equals(relation) && question.contains("防治对象"))
+                || ("INFECTS".equals(relation) && question.contains("侵染"))
+                || ("INCLUDES".equals(relation) && question.contains("有效成分"))) return 0;
+        return 1;
+    }
+
+    private String relationshipDescription(Map<String, Object> fact) {
+        String relation = String.valueOf(fact.get("relation"));
+        String source = String.valueOf(fact.get("sourceName"));
+        String target = String.valueOf(fact.get("targetName"));
+        String sourceLabel = String.valueOf(fact.get("sourceLabel"));
+        String targetLabel = String.valueOf(fact.get("targetLabel"));
+        if ("INCLUDES".equals(relation) && "ActiveSubstance".equals(sourceLabel) && "RegisterNumber".equals(targetLabel)) {
+            return "「" + target + "」的有效成分包括「" + source + "」";
+        }
+        String label = "在图谱中关联";
+        if ("INCLUDES".equals(relation) && "RegisterNumber".equals(sourceLabel) && "ActiveSubstance".equals(targetLabel)) {
+            label = "的有效成分包括";
+        } else if ("APPLIED_TO".equals(relation) && "RegisterNumber".equals(sourceLabel) && "Crop".equals(targetLabel)) {
+            label = "的登记作物包括";
+        } else if ("TREATS".equals(relation) && "RegisterNumber".equals(sourceLabel) && "Disease".equals(targetLabel)) {
+            label = "的登记防治对象包括";
+        } else if ("INFECTS".equals(relation) && "Disease".equals(sourceLabel) && "Crop".equals(targetLabel)) {
+            label = "的侵染关联作物包括";
+        }
+        return "「" + source + "」" + label + "「" + target + "」";
     }
 
     private List<String> planSearchTerms(String question, List<Map<String, String>> conversationContext) throws Exception {
@@ -174,7 +310,7 @@ public class DeepSeekGraphAssistantService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> retrieveEvidence(List<String> searchTerms) {
+    private List<Map<String, Object>> retrieveEvidence(List<String> searchTerms, boolean definitionOnly) {
         List<Map<String, Object>> evidence = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
 
@@ -182,6 +318,14 @@ public class DeepSeekGraphAssistantService {
             Map<String, Object> graph = graphExploreService.search(term);
             if (!Boolean.TRUE.equals(graph.get("found"))) continue;
             appendAttributeEvidence(graph, evidence, seen);
+            if (definitionOnly) {
+                for (Map<String, Object> fact : evidence) {
+                    if (DEFINITION_LABEL.equals(fact.get("property"))) {
+                        fact.put("index", 1);
+                        return Collections.singletonList(fact);
+                    }
+                }
+            }
             boolean registerIsCenter = hasCenterLabel(graph, "RegisterNumber");
             appendEvidence(
                     graph,
@@ -326,9 +470,7 @@ public class DeepSeekGraphAssistantService {
                         .append(") 的 ").append(fact.get("property")).append(" = ")
                         .append(fact.get("value")).append('\n');
             } else {
-                facts.append(fact.get("sourceName")).append(" (").append(fact.get("sourceLabel")).append(") --")
-                        .append(fact.get("relation")).append("-- ")
-                        .append(fact.get("targetName")).append(" (").append(fact.get("targetLabel")).append(")\n");
+                facts.append(relationshipDescription(fact)).append('\n');
             }
         }
 

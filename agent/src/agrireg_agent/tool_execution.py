@@ -6,6 +6,7 @@ import httpx
 
 from .documents import _normalize_registration
 from .models import PlanStep
+from .presentation import verified_chain
 
 
 MAX_STEP_ATTEMPTS = 3
@@ -57,8 +58,8 @@ def assess_result(step: PlanStep, result: Any) -> tuple[ToolOutcome, list[dict[s
         if not matching:
             return "unexpected", [], "返回文档与目标登记号不一致。"
         evidence = matching
-    if step.tool == "find_relation_path" and not any(item.get("kind") == "graph_relation" for item in evidence):
-        return "partial", evidence, "仅查到端点，缺少能证明完整路径的关系。"
+    if step.tool == "find_relation_path" and verified_chain(result.get("data"), evidence) is None:
+        return "partial", evidence, "缺少能从起点连到终点的关系证据。"
     if step.tool == "compare_entities":
         data = result.get("data")
         sides = [data.get(key) for key in ("left", "right")] if isinstance(data, dict) else []

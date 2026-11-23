@@ -9,6 +9,7 @@ import httpx
 
 from .config import Settings
 from .documents import DocumentSearchRequest, build_document_search
+from .presentation import relation_sentence
 
 
 class DeepSeekClient:
@@ -217,7 +218,7 @@ class ControlledTools:
     def _graph_result(self, tool: str, payload: dict[str, Any], terms: list[str]) -> dict[str, Any]:
         evidence: list[dict[str, Any]] = []
         nodes = payload.get("nodes") or []
-        names = {str(node.get("id")): node.get("name") or "未知实体" for node in nodes}
+        by_id = {str(node.get("id")): node for node in nodes if node.get("name")}
         for node in nodes[:16]:
             metadata = node.get("evidence") or {}
             properties = node.get("properties") or {}
@@ -228,6 +229,7 @@ class ControlledTools:
                     "source": properties.get("definition_source_title") or "GDP-KG",
                     "title": node.get("name") or "实体释义",
                     "kind": "entity_definition",
+                    "is_center": True,
                     "summary": definition,
                     "url": properties.get("definition_source_url") or "",
                 })
@@ -237,6 +239,7 @@ class ControlledTools:
                     "source": metadata.get("dataset") or "GDP-KG",
                     "title": node.get("name") or "图谱实体",
                     "kind": node.get("label") or "Entity",
+                    "is_center": bool(node.get("center")),
                     "summary": self._properties_summary({
                         key: value for key, value in properties.items() if not key.startswith("definition_")
                     }),
@@ -246,16 +249,18 @@ class ControlledTools:
                 }
             )
         for edge in (payload.get("edges") or [])[:24]:
-            source = names.get(str(edge.get("source")), str(edge.get("source")))
-            target = names.get(str(edge.get("target")), str(edge.get("target")))
+            source = by_id.get(str(edge.get("source")))
+            target = by_id.get(str(edge.get("target")))
+            if source is None or target is None:
+                continue
             relation = edge.get("type") or "RELATED_TO"
             evidence.append(
                 {
                     "id": f"graph-edge:{edge.get('source')}:{edge.get('target')}:{relation}",
                     "source": "GDP-KG",
-                    "title": f"{source} → {target}",
+                    "title": f"{source['name']} · {target['name']}",
                     "kind": "graph_relation",
-                    "summary": f"{source} -[{relation}]-> {target}",
+                    "summary": relation_sentence(source, relation, target),
                     "url": "",
                     "properties": edge,
                 }
@@ -269,9 +274,13 @@ class ControlledTools:
 
     @staticmethod
     def _properties_summary(properties: dict[str, Any]) -> str:
-        if not properties:
-            return "图谱实体记录"
-        return "；".join(f"{key}={value}" for key, value in list(properties.items())[:5])
+        labels = {
+            "Trade name": "商品名", "Active Ingredient": "有效成分", "jurisdiction": "登记地区",
+            "CAS registry number": "CAS 号", "Molecular or Experimental Formulas Formul": "分子式",
+            "Mode of action": "作用方式", "Resistance": "抗性记录",
+        }
+        details = [f"{label}：{properties[key]}" for key, label in labels.items() if properties.get(key)]
+        return "。".join(details[:4]) or "图谱实体记录"
 
     @staticmethod
     def _fact_summary(item: dict[str, Any]) -> str:

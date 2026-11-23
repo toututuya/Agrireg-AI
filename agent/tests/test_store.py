@@ -24,6 +24,7 @@ def test_planning_context_keeps_recent_raw_and_older_entities(tmp_path):
         question = f"查询 '{term}' 的图谱关系"
         run = store.create_run(thread_id, question, False)
         store.append_event(run["id"], "plan_ready", "计划", "", {"plan": fallback_plan(question).model_dump()})
+        store.append_event(run["id"], "evidence_verified", "证据", "", {"evidence": [{"title": term}]})
         store.update_run(run["id"], "completed")
     followup = store.create_run(thread_id, "它的登记证呢？", False)
 

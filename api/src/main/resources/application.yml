@@ -25,3 +25,6 @@ deepseek:
   api-key: ${DEEPSEEK_API_KEY:}
   base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
   model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+
+assistant:
+  agent-answer-url: ${AGENT_ANSWER_URL:}
