@@ -35,7 +35,10 @@ app.add_middleware(
 
 @app.get("/api/agent/health")
 def health() -> dict[str, object]:
-    return {"status": "ok", "modelPlanning": runtime.llm.enabled, "persistence": "sqlite"}
+    return {
+        "status": "ok", "modelPlanning": runtime.planner.enabled,
+        "plannerBackend": settings.planner_backend, "persistence": "sqlite",
+    }
 
 
 @app.post("/api/agent/documents/search")

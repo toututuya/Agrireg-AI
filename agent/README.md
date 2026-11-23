@@ -72,3 +72,20 @@ agrireg-mcp --transport streamable-http --port 8092
 ~~~
 
 HTTP 地址为 `http://127.0.0.1:8092/mcp`。配置图谱 API 或 Milvus 后，相应工具即可查询。文档工具的入参结构为 `{"request":{"query":"登记状态","limit":5}}`。
+
+## Qwen3 规划器 LoRA
+
+本地联调与实测指标见 [联调记录](evaluation/SMOKE_RESULTS_CN.md)。
+
+训练对象为 Qwen3-1.7B，关闭思考模式，用计划 JSON 监督工具选择、参数、缺参追问与审批标记。训练只对 assistant 输出计算损失，LoRA 更新注意力层的 Q、K、V、O 投影。合成数据按实体和问法模板留出，包含 336 条训练样本和 42 条测试样本。样本中的登记号只用于测试路由。
+
+~~~bash
+python -m pip install -e ".[training]"
+agrireg-planner-sft data --output ./planner-data
+CUDA_VISIBLE_DEVICES=0 agrireg-planner-sft train --output ./runs/qwen3-planner --steps 64
+CUDA_VISIBLE_DEVICES=0 agrireg-planner-sft evaluate --adapter ./runs/qwen3-planner --output ./runs/planner-eval.json
+~~~
+
+两项实验命令都可用 `--base` 指向提前下载的 Qwen3 权重目录。显存紧张时加装 `.[training,training-4bit]`，训练和评测使用同一个 `--four-bit` 开关。评测在同一基础模型上分别关闭和启用 adapter，记录 JSON 格式通过数、有效计划数、意图和工具匹配数、精确动作数以及生成 p50/p95。精确动作要求参数匹配，追问题还要求指出缺失字段。
+
+在 `.env.local` 设置 `AGENT_PLANNER_BACKEND=qwen3`、`AGENT_QWEN_BASE`、`AGENT_QWEN_ADAPTER` 和 `AGENT_QWEN_DEVICE`。部署量化版本时设置 `AGENT_QWEN_4BIT=true`。计划验证失败时使用确定性规划，证据检索及汇总继续走现有 LangGraph 流程。

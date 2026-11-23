@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Protocol
 
-from .clients import DeepSeekClient
 from .models import PlanStep, TaskPlan
 
 
@@ -32,6 +31,10 @@ REGISTRATION = re.compile(r"(?<![A-Z0-9])(?:PD|WP|LS|WL|EX)\d{5,12}(?![A-Z0-9])"
 DOCUMENT_TERMS = re.compile(r"登记(证|号|文档|内容|材料|有效|状态)|说明书|标签|文件|附件")
 COMPLIANCE_TERMS = re.compile(r"合规|风险|禁用|批准|能否使用|是否允许")
 FOLLOWUP = re.compile(r"^(?:那[么，, ]*)?(?:它|该产品|这个产品|该成分|该对象|上一个)")
+
+
+class PlannerModel(Protocol):
+    def json_completion(self, system: str, user: str) -> dict[str, Any] | None: ...
 
 
 def planning_input(question: str, documents_enabled: bool, context: dict[str, Any] | None = None) -> str:
@@ -78,7 +81,7 @@ def parse_plan(candidate: Any, question: str, documents_enabled: bool) -> TaskPl
 
 
 def build_plan(
-    question: str, require_approval: bool, llm: DeepSeekClient,
+    question: str, require_approval: bool, llm: PlannerModel,
     documents_enabled: bool = False, context: dict[str, Any] | None = None,
 ) -> TaskPlan:
     recent = (context or {}).get("recent") or []

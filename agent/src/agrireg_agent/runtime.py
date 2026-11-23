@@ -11,6 +11,7 @@ from langgraph.types import Command
 from .clients import ControlledTools, DeepSeekClient
 from .config import Settings
 from .graph import build_agent_graph
+from .planner_sft import LocalQwenPlanner
 from .store import RunStore
 
 
@@ -30,9 +31,14 @@ class AgentRuntime:
         self.checkpointer.setup()
         self.tools = tools or ControlledTools(settings)
         self.llm = llm or DeepSeekClient(settings)
+        self.planner = self.llm
+        if settings.planner_backend == "qwen3":
+            self.planner = LocalQwenPlanner(
+                settings.qwen_base, settings.qwen_adapter, settings.qwen_device, settings.qwen_four_bit,
+            )
         self.graph = build_agent_graph(
             self.tools, self.llm, self.checkpointer,
-            documents_enabled=bool(settings.milvus_uri), max_tool_steps=settings.max_tool_steps,
+            planner=self.planner, documents_enabled=bool(settings.milvus_uri), max_tool_steps=settings.max_tool_steps,
         )
         self._tasks: set[asyncio.Task[Any]] = set()
 
