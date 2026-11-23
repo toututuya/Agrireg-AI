@@ -11,6 +11,10 @@ UNWIND labels(n) AS label
 RETURN label, count(*) AS nodes
 ORDER BY nodes DESC;
 
+MATCH ()-[relationship]->()
+RETURN type(relationship) AS relationshipType, count(relationship) AS relationships
+ORDER BY relationships DESC;
+
 UNWIND ['Crop', 'Disease', 'ActiveSubstance', 'PesticideCategory'] AS targetLabel
 MATCH (n)
 WHERE targetLabel IN labels(n) AND n.normalized_name IS NOT NULL
@@ -54,7 +58,24 @@ RETURN
   sum(CASE WHEN registration.valid_until_parse_status = 'parsed' THEN 1 ELSE 0 END) AS parsedValidUntil,
   sum(CASE WHEN registration.valid_until_parse_status = 'unparsed' THEN 1 ELSE 0 END) AS unparsedValidUntil,
   sum(CASE WHEN registration.valid_until_parse_status = 'missing' THEN 1 ELSE 0 END) AS missingValidUntil,
-  sum(CASE WHEN registration.provenance_status = 'missing_source_url' THEN 1 ELSE 0 END) AS missingSourceUrl;
+  sum(CASE WHEN registration.provenance_status = 'missing_source_url' THEN 1 ELSE 0 END) AS missingSourceUrl,
+  sum(CASE WHEN registration.`Member State of origin` = 'China' THEN 1 ELSE 0 END) AS china,
+  sum(CASE WHEN registration.Status IS NOT NULL THEN 1 ELSE 0 END) AS germany,
+  sum(CASE WHEN registration.`Approval number/Member State of origin` IS NOT NULL THEN 1 ELSE 0 END) AS euMutualRecognition,
+  sum(CASE WHEN registration.`Member State of origin` IS NULL
+            AND registration.Status IS NULL THEN 1 ELSE 0 END) AS unclassified;
+
+MATCH (registration:RegisterNumber)
+WITH trim(toString(registration.`Member State of origin`)) AS jurisdiction
+WHERE jurisdiction <> '' AND jurisdiction <> '-'
+RETURN jurisdiction, count(*) AS records
+ORDER BY records DESC;
+
+MATCH (registration:RegisterNumber)
+WHERE registration.source_url IS NULL OR registration.collected_at IS NULL
+RETURN registration.name AS registrationNumber
+ORDER BY registrationNumber
+LIMIT 100;
 
 MATCH (n:ActiveSubstance)
 WHERE n.normalized_name = 'chlorantraniliprole'
