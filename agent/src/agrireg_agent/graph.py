@@ -9,7 +9,7 @@ from langgraph.types import Command, interrupt
 
 from .clients import ControlledTools, DeepSeekClient
 from .models import AgentState, TaskPlan
-from .planner import build_plan, compact_plan, followup_steps
+from .planner import PlannerModel, build_plan, compact_plan, followup_steps
 
 
 REPORT_SYSTEM = """Select up to eight evidence numbers relevant to the current screening question.
@@ -21,13 +21,14 @@ def build_agent_graph(
     llm: DeepSeekClient,
     checkpointer: Any,
     *,
+    planner: PlannerModel | None = None,
     documents_enabled: bool = False,
     max_tool_steps: int = 6,
 ):
     def plan_node(state: AgentState) -> dict[str, Any]:
         started = perf_counter()
         plan = build_plan(
-            state["question"], bool(state.get("require_approval")), llm,
+            state["question"], bool(state.get("require_approval")), planner if planner is not None else llm,
             documents_enabled, state.get("context"),
         )
         plan.steps = plan.steps[:max_tool_steps]

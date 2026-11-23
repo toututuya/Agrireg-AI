@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,11 @@ class Settings(BaseSettings):
     retrieval_device: str = Field("", alias="AGENT_RETRIEVAL_DEVICE")
     embedding_model: str = Field("BAAI/bge-m3", alias="AGENT_EMBEDDING_MODEL")
     reranker_model: str = Field("BAAI/bge-reranker-v2-m3", alias="AGENT_RERANKER_MODEL")
+    planner_backend: Literal["deepseek", "qwen3"] = Field("deepseek", alias="AGENT_PLANNER_BACKEND")
+    qwen_base: str = Field("Qwen/Qwen3-1.7B", alias="AGENT_QWEN_BASE")
+    qwen_adapter: str = Field("", alias="AGENT_QWEN_ADAPTER")
+    qwen_device: str = Field("cuda", alias="AGENT_QWEN_DEVICE")
+    qwen_four_bit: bool = Field(False, alias="AGENT_QWEN_4BIT")
 
     deepseek_enabled: bool = Field(False, alias="DEEPSEEK_ENABLED")
     deepseek_api_key: str = Field("", alias="DEEPSEEK_API_KEY")

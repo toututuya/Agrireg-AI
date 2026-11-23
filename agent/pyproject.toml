@@ -19,6 +19,13 @@ documents = [
   "sentence-transformers>=4.1,<6"
 ]
 mcp = ["mcp>=1.25,<2"]
+training = [
+  "torch>=2.5,<3",
+  "transformers==4.55.4",
+  "peft==0.17.1",
+  "accelerate==1.10.1"
+]
+training-4bit = ["bitsandbytes==0.46.1"]
 dev = [
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7"
@@ -28,6 +35,7 @@ dev = [
 agrireg-agent = "agrireg_agent.api:run"
 agrireg-documents = "agrireg_agent.documents:main"
 agrireg-mcp = "agrireg_agent.mcp_server:main"
+agrireg-planner-sft = "agrireg_agent.planner_sft:main"
 
 [build-system]
 requires = ["setuptools>=75"]
