@@ -52,3 +52,22 @@ DOC_API=http://127.0.0.1:18082/api/agent/documents/search
 python evaluation/evaluate_documents.py "$DATA/document_qrels_exact.jsonl" --api-url "$DOC_API" --limit 5
 python evaluation/evaluate_documents.py "$DATA/document_qrels_keyword.jsonl" --api-url "$DOC_API" --limit 5
 ~~~
+
+## 实测结果
+
+Seed 42 在单张 RTX 3090 上完成 525 个优化步，用时 867.7 秒。第 1、2、3 轮的验证综合分分别为 50.8%、55.4% 和 52.5%。选择第 2 轮 `checkpoint-350` 对照同一个 Qwen3-1.7B 底座。
+
+| 冻结测试指标 | Qwen3 底座 | 第 2 轮 QLoRA |
+| --- | ---: | ---: |
+| 参数齐全时关键动作正确 | 0/120 | 104/120 |
+| 参数齐全时快照执行成功 | 0/120 | 103/120 |
+| 缺参时原始计划拟调用 | 72/80 | 31/80 |
+| 正确追问且原始计划无拟调用 | 0/80 | 38/80 |
+| 首轮问对，补参后执行成功 | 0/80 | 37/80 |
+| 给定补参后执行成功 | 0/80 | 78/80 |
+
+分数衡量原始模型输出和冻结快照回放。主要错误集中在首轮缺参识别。服务执行仍会验证计划、处理显式追问和按号核对证据。
+
+在全库索引上，Cross-Encoder 模式的证号组 40 条和关键词组 8 条均达到 Recall@5 1.0。证号组将登记号作为过滤条件。8 条关键词查询的热态检索接口 p95 在 CPU 上为 11.55 秒，在 GPU 上为 0.34 秒。
+
+真实接口用 `00A657-62` 验证了精确引用、图谱路径、独立分项和补参后续跑。FastMCP 通过 Streamable HTTP 使用同一个 Milvus 索引和 Neo4j API，返回了登记片段和路径证据。[汇总指标](migration_result_seed42.json)

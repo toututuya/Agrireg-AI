@@ -150,6 +150,12 @@ def test_split_requires_explicit_task_boundaries_and_prior_dependencies():
     assert [task["question"] for task in queries] == ["查 PD20990101", "再查 PD20990102"]
 
 
+def test_same_registration_reference_stays_in_the_original_task():
+    assert split_subtasks("我只想在登记资料里核对一下 00A657-62。请定位这个编号对应的文档。") == []
+    tasks = split_subtasks("1. 查 00A657-62。\n2. 根据第1项查这个编号的登记资料。")
+    assert len(tasks) == 2 and tasks[1]["depends_on"] == [1]
+
+
 def test_dependent_task_uses_verified_registration_from_the_prior_result(tmp_path):
     registrations = []
 
